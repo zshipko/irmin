@@ -38,9 +38,9 @@ module Make(Store : STORE) : S with type store = Store.t = struct
   type store = Store.t
 
   let decode t s =
-    match Irmin.Type.of_string t s with
+    match Irmin.Type.of_json_string t s with
     | Ok x -> Ok x
-    | Error _ -> Irmin.Type.of_json_string t s
+    | Error _ -> Irmin.Type.of_string t s
 
   let from_string key f = function
     | `String s -> Ok (f s)
