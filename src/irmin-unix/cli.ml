@@ -597,18 +597,28 @@ let graphql = {
       let doc = Arg.info ~doc:"Port for graphql server." ["p"; "port"] in
       Arg.(value & opt int 8080 & doc)
     in
-    let graphql (S ((module S), store, remote_fn)) port =
+    let json =
+      let doc = Arg.info ~doc:"Use JSON encoding for values" ["json"] in
+      Arg.(value & flag & doc)
+    in
+    let graphql (S ((module S), store, remote_fn)) port json =
       run begin
         store >>= fun t ->
         let module Server = Irmin_graphql.Make (struct
           include S
           let info = info
           let remote = remote_fn
+          let string_of_contents t x =
+            if json then Irmin.Type.to_json_string t x
+            else Irmin.Type.to_string t x
+          let contents_of_string =
+            if json then Irmin.Type.of_json_string
+            else Irmin.Type.of_string
         end) in
         Server.start_server ~port t
       end
     in
-    Term.(mk graphql $ store $ port)
+    Term.(mk graphql $ store $ port $ json)
 }
 
 let default =

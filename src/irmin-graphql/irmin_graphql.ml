@@ -21,6 +21,8 @@ module type STORE = sig
   include Irmin.S
   val remote: (?headers:Cohttp.Header.t -> string -> Irmin.remote) option
   val info: ?author:string -> ('a, Format.formatter, unit, Irmin.Info.f) format4 -> 'a
+  val string_of_contents: 'a Irmin.Type.t -> 'a -> string
+  val contents_of_string: 'a Irmin.Type.t -> string -> ('a, [`Msg of string]) result
 end
 
 module Make(Store : STORE) : S with type store = Store.t = struct
@@ -147,7 +149,7 @@ module Make(Store : STORE) : S with type store = Store.t = struct
                 ~resolve:(fun _ (tree, key) ->
                     Store.Tree.find tree key >>= function
                       | Some contents ->
-                          let s = Irmin.Type.to_string Store.contents_t contents in
+                          let s = Store.string_of_contents Store.contents_t contents in
                           Lwt.return_ok (Some s)
                       | _ -> Lwt.return_ok None
                 );
@@ -200,7 +202,7 @@ module Make(Store : STORE) : S with type store = Store.t = struct
                     match from_string_err "key" (Irmin.Type.of_string Store.key_t) key with
                     | Ok key ->
                       (Store.find s key >>= function
-                        | Some v -> Lwt.return_ok (Some (Irmin.Type.to_string Store.contents_t v))
+                        | Some v -> Lwt.return_ok (Some (Store.string_of_contents Store.contents_t v))
                         | None -> Lwt.return_ok None)
                     | Error msg -> Lwt.return_error msg
                   )
@@ -262,7 +264,7 @@ module Make(Store : STORE) : S with type store = Store.t = struct
                     Store.Tree.find tree key >|= function
                     | None -> Ok None
                     | Some contents ->
-                      Ok (Some (Irmin.Type.to_string Store.contents_t contents))
+                      Ok (Some (Store.string_of_contents Store.contents_t contents))
                   )
               ;
             ])
@@ -370,7 +372,7 @@ module Make(Store : STORE) : S with type store = Store.t = struct
               (mk_branch (Store.repo s) branch >>= fun t ->
               let info = mk_info i in
               let key = Irmin.Type.of_string Store.key_t k in
-              let value = Irmin.Type.of_string Store.contents_t v in
+              let value = Store.contents_of_string Store.contents_t v in
               match key, value with
               | Ok key, Ok value ->
                 (Store.set t key value ~info >>= function
@@ -395,7 +397,7 @@ module Make(Store : STORE) : S with type store = Store.t = struct
               (mk_branch (Store.repo s) branch >>= fun t ->
               let info = mk_info i in
               let key = Irmin.Type.of_string Store.key_t k in
-              let value = Irmin.Type.of_string Store.contents_t v in
+              let value = Store.contents_of_string Store.contents_t v in
               let metadata = match m with
                 | Some m ->
                     (match Irmin.Type.of_string Store.metadata_t m with
