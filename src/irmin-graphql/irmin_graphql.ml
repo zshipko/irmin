@@ -227,22 +227,37 @@ module Make(Store : STORE) : S with type store = Store.t = struct
               ;
               io_field "get_tree"
                 ~args:Arg.[arg "key" ~typ:(non_null Input.key)]
-                ~typ:(list (non_null @@ Lazy.force contents))
+                ~typ:(string)
                 ~resolve:(fun _ (s, _) key ->
-                    let rec tree_list base tree key acc =
+                    let make_json x =
+                      match Irmin.Type.of_json_string Irmin.Contents.Json_value.t x with
+                      | Ok x -> x
+                      | Error (`Msg msg) -> failwith msg
+                    in
+                    let rec tree_obj tree key acc =
                       match tree with
-                      | `Contents (_, _) ->
-                          (Store.Tree.of_concrete base, key) :: acc
+                      | `Contents (c, m) ->
+                          let c = Irmin.Type.to_json_string Store.contents_t c |> make_json in
+                          let m = Irmin.Type.to_json_string Store.metadata_t m |> make_json in
+                          `O ["contents", c; "metadata", m]
                       | `Tree l ->
-                          List.fold_right (fun (step, t) acc -> tree_list base t (Store.Key.rcons key step) [] @ acc) l acc
+                          `O (List.fold_right (fun (step, t) acc ->
+                            let obj = tree_obj t (Store.Key.rcons key step) [] in
+                            let step = Irmin.Type.to_string Store.step_t step in
+                            (step, obj) :: acc) l acc)
                     in
                     match from_string_err "key" (Irmin.Type.of_string Store.key_t) key with
                     | Ok key ->
                         (Store.find_tree s key >>= function
                           | Some t ->
-                              Store.Tree.to_concrete t >>= fun t ->
-                              let l = tree_list t t Store.Key.empty [] in
-                              Lwt.return_ok (Some l)
+                              Lwt.catch (fun () ->
+                                Store.Tree.to_concrete t >>= fun t ->
+                                let obj = tree_obj t Store.Key.empty [] in
+                                let s = Irmin.Type.to_string Irmin.Contents.Json_value.t obj in
+                                Lwt.return_ok (Some s))
+                              (function
+                                | Failure err -> Lwt.return_error err
+                                | exc -> raise exc)
                           | None -> Lwt.return_ok None)
                     | Error msg -> Lwt.return_error msg
                   )
