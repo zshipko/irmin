@@ -17,11 +17,11 @@ type commit_input = {
   message: string option;
 }
 
-type tree_item = {
+(*type tree_item = {
   key: string;
   value: string option;
   metadata: string option;
-}
+}*)
 
 module type STORE = sig
   include Irmin.S
@@ -67,7 +67,7 @@ module Make(Store : STORE) : S with type store = Store.t = struct
           ~coerce:(fun author message -> {author; message})
       )
 
-    let item = Schema.Arg.(
+    (*let item = Schema.Arg.(
       obj "TreeItem"
         ~fields:[
           arg "key" ~typ:(non_null string);
@@ -78,7 +78,7 @@ module Make(Store : STORE) : S with type store = Store.t = struct
       )
 
     let tree = Schema.Arg.(
-      non_null (list (non_null item)))
+      non_null (list (non_null item)))*)
   end
 
   let rec commit = lazy Schema.(
@@ -230,16 +230,16 @@ module Make(Store : STORE) : S with type store = Store.t = struct
                 ~typ:(string)
                 ~resolve:(fun _ (s, _) key ->
                     let make_json x =
-                      match Irmin.Type.of_json_string Irmin.Contents.Json_value.t x with
+                      match Irmin.Type.of_string Irmin.Contents.Json_value.t x with
                       | Ok x -> x
                       | Error (`Msg msg) -> failwith msg
                     in
                     let rec tree_obj tree key acc =
                       match tree with
-                      | `Contents (c, _) ->
+                      | `Contents (c, m) ->
                           let c = Irmin.Type.to_json_string Store.contents_t c |> make_json in
-                          (*let m = Irmin.Type.to_string Store.metadata_t m |> make_json in*)
-                          `O ["contents", c]
+                          let m = Irmin.Type.to_string Store.metadata_t m |> make_json in
+                          `O ["contents", c; "metadata", m]
                       | `Tree l ->
                           `O (List.fold_right (fun (step, t) acc ->
                             let obj = tree_obj t (Store.Key.rcons key step) [] in
@@ -444,34 +444,47 @@ module Make(Store : STORE) : S with type store = Store.t = struct
         ~args:Arg.[
             arg "branch" ~typ:Input.branch;
             arg "key" ~typ:(non_null string);
-            arg "tree" ~typ:(Input.tree);
+            arg "tree" ~typ:(non_null string);
             arg "info" ~typ:Input.info;
           ]
-        ~resolve:(fun _ _src branch k items i ->
-          let unwrap_metadata m =
-            match m with
-            | Some m ->
-              (match Irmin.Type.of_string Store.metadata_t m with
-              | Ok m -> Some m
-              | Error (`Msg e) -> failwith e)
-            | None -> None
+        ~resolve:(fun _ _src branch k tree i ->
+          let of_json x =
+            let s = Irmin.Type.to_string Irmin.Contents.Json_value.t x in
+            match Irmin.Type.of_json_string Store.contents_t s with
+            | Ok x -> x
+            | Error (`Msg msg) -> failwith msg
           in
-          let to_tree tree l = Lwt_list.fold_left_s (fun tree -> function
-            | {key; value = Some x; metadata} ->
-                let k = Irmin.Type.of_string Store.key_t key in
-                let v = Irmin.Type.of_string Store.contents_t x in
-                let metadata = unwrap_metadata metadata in
-                (match k, v with
-                | Ok k, Ok v ->
-                  Store.Tree.add tree ?metadata k v
-                | Error (`Msg e), _ | _, Error (`Msg e) -> failwith e)
-              | {key; value = None; _} ->
-                let k = Irmin.Type.of_string Store.key_t key in
-                (match k with
-                | Ok k ->
-                  Store.Tree.remove tree k
-                | Error (`Msg e) -> failwith e)) tree l
+          let unwrap = function
+            | Ok x -> x
+            | Error (`Msg msg) -> failwith msg
           in
+          let rec to_tree tree (key: Store.key) = function
+            | `O l when List.mem_assoc "contents" l ->
+                let contents = List.assoc "contents" l in
+                (match contents with
+                | `Null ->
+                    Store.Tree.remove tree key
+                | contents ->
+                  let contents = of_json contents in
+                  let metadata =
+                    try
+                      (let m = List.assoc "metadata" l in
+                      match m with
+                      | `String s ->
+                          (match Irmin.Type.of_string Store.metadata_t s with
+                          | Ok m -> Some m
+                          | Error (`Msg msg) -> failwith msg)
+                      | _ -> None)
+                    with Not_found -> None
+                  in
+                  Store.Tree.add tree key ?metadata contents)
+            | `O l ->
+                Lwt_list.fold_left_s (fun tree (step, t) ->
+                  let step = Irmin.Type.of_string Store.step_t step |> unwrap in
+                  to_tree tree (Store.Key.rcons key step) t) tree l
+            | _ -> failwith "Invalid value"
+          in
+          let json = Irmin.Type.of_string Irmin.Contents.Json_value.t tree |> unwrap in
           match to_branch branch with
           | Ok branch ->
               mk_branch (Store.repo s) branch >>= fun t ->
@@ -485,7 +498,7 @@ module Make(Store : STORE) : S with type store = Store.t = struct
                       | Some t -> t
                       | None -> Store.Tree.empty
                     in
-                    to_tree tree items >>= Lwt.return_some)
+                    to_tree tree Store.Key.empty json >>= Lwt.return_some)
                     >>= fun () ->
                     Store.Head.find t >>= Lwt.return_ok)
                   (function
