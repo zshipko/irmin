@@ -236,10 +236,10 @@ module Make(Store : STORE) : S with type store = Store.t = struct
                     in
                     let rec tree_obj tree key acc =
                       match tree with
-                      | `Contents (c, m) ->
+                      | `Contents (c, _) ->
                           let c = Irmin.Type.to_json_string Store.contents_t c |> make_json in
-                          let m = Irmin.Type.to_json_string Store.metadata_t m |> make_json in
-                          `O ["contents", c; "metadata", m]
+                          (*let m = Irmin.Type.to_string Store.metadata_t m |> make_json in*)
+                          `O ["contents", c]
                       | `Tree l ->
                           `O (List.fold_right (fun (step, t) acc ->
                             let obj = tree_obj t (Store.Key.rcons key step) [] in
