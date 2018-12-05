@@ -607,6 +607,17 @@ let graphql = {
     Term.(mk graphql $ store $ port)
 }
 
+let graphql_queries = {
+  name = "graphql-queries";
+  doc = "Print default GraphQL queries used by irmin-graphql-client.";
+  man = [];
+  term =
+    let graphql_queries () =
+      print_endline @@ Irmin_graphql_client.Query.generate_json ()
+    in
+    Term.(mk graphql_queries $ pure ())
+}
+
 let default =
   let doc = "Irmin, the database that never forgets." in
   let man = [
@@ -672,6 +683,7 @@ let commands = List.map create_command [
     watch;
     dot;
     graphql;
+    graphql_queries;
   ]
 
 let run ~default:x y =
