@@ -61,7 +61,7 @@ module Type: sig
   type 'a t
   (** The type for runtime representation of values of type ['a]. *)
 
-  type len = [ `Int8 | `Int16 | `Int32 | `Int64 | `Fixed of int]
+  type len = [ `Int | `Int8 | `Int16 | `Int32 | `Int64 | `Fixed of int]
   (** The type of integer used to store buffers, list or array
      lengths. *)
 
@@ -77,8 +77,8 @@ module Type: sig
   (** [char] is a representation of the character type. *)
 
   val int: int t
-  (** [int] is a representation of integers. They will always be
-     serialised to 64 bits. *)
+  (** [int] is a representation of integers. Binary serialization used
+      a varying-width representation. *)
 
   val int32: int32 t
   (** [int32] is a representation of the 32-bit integers type. *)
@@ -789,17 +789,85 @@ type 'a diff = 'a Diff.t
 (** The type for representing differences betwen values. *)
 
 (** An Irmin store is automatically built from a number of lower-level
-    stores, implementing fewer operations, such as {{!AO}append-only}
-    and {{!RW}read-write} stores. These low-level stores are provided
+    stores, implementing fewer operations, such as
+    {{!CONTENT_ADDRESSABLE_STORE}content-addressable}
+    and {{!ATOMIC_WRITE_STORE}atomic-write} stores. These low-level stores
+    are provided
     by various backends. *)
 
-(** Read-only backend stores. *)
-module type RO = sig
+(** Content-addressable backend store. *)
+module type CONTENT_ADDRESSABLE_STORE = sig
 
-  (** {1 Read-only stores} *)
+  (** {1 Content-addressable stores}
+
+      Content-addressable stores are store where it is possible to read
+      and add new values. Keys are derived from the values raw contents
+      and hence are deterministic. *)
+
+  type 'a t
+  (** The type for content-addressable backend stores. The ['a]
+     phantom type carries information about the store mutability. *)
+
+  type key
+  (** The type for keys. *)
+
+  type value
+  (** The type for raw values. *)
+
+  val mem: [> `Read] t -> key -> bool Lwt.t
+  (** [mem t k] is true iff [k] is present in [t]. *)
+
+  val find: [> `Read] t -> key -> value option Lwt.t
+  (** [find t k] is [Some v] if [k] is associated to [v] in [t] and
+      [None] is [k] is not present in [t]. *)
+
+  val add: [> `Write] t -> value -> key Lwt.t
+  (** Write the contents of a value to the store. It's the
+      responsibility of the content-addressable store to generate a
+      consistent key. *)
+
+end
+
+(** Append-onlye backend store. *)
+module type APPEND_ONLY_STORE = sig
+
+  (** {1 Append-only stores}
+
+      Append-onlye stores are store where it is possible to read
+      and add new values. *)
+
+  type 'a t
+  (** The type for append-only backend stores. The ['a]
+     phantom type carries information about the store mutability. *)
+
+  type key
+  (** The type for keys. *)
+
+  type value
+  (** The type for raw values. *)
+
+  val mem: [> `Read] t -> key -> bool Lwt.t
+  (** [mem t k] is true iff [k] is present in [t]. *)
+
+  val find: [> `Read] t -> key -> value option Lwt.t
+  (** [find t k] is [Some v] if [k] is associated to [v] in [t] and
+      [None] is [k] is not present in [t]. *)
+
+  val add: [> `Write] t -> key -> value -> unit Lwt.t
+  (** Write the contents of a value to the store. *)
+
+end
+
+(** Atomic-write stores. *)
+module type ATOMIC_WRITE_STORE = sig
+
+  (** {1 Atomic write stores}
+
+      Atomic-write stores are stores where it is possible to read,
+      update and remove elements, with atomically guarantees. *)
 
   type t
-  (** The type for read-only backend stores. *)
+  (** The type for atomic-write backend stores.  *)
 
   type key
   (** The type for keys. *)
@@ -813,57 +881,6 @@ module type RO = sig
   val find: t -> key -> value option Lwt.t
   (** [find t k] is [Some v] if [k] is associated to [v] in [t] and
       [None] is [k] is not present in [t]. *)
-
-end
-
-(** Append-only backend store. *)
-module type AO = sig
-
-  (** {1 Append-only stores}
-
-      Append-only stores are read-only store where it is also possible
-      to add values. Keys are derived from the values raw contents and
-      hence are deterministic. *)
-
-  include RO
-
-  val add: t -> value -> key Lwt.t
-  (** Write the contents of a value to the store. It's the
-      responsibility of the append-only store to generate a
-      consistent key. *)
-
-end
-
-(** Immutable Link store. *)
-module type LINK = sig
-
-  (** {1 Immutable Link stores}
-
-      The link store contains {i verified} links between low-level
-      keys. This is used to certify that a value can be accessed via
-      different keys: because they have been obtained using different
-      hash functions (SHA1 and SHA256 for instance) or because the
-      value might have different but equivalent concrete
-      representation (for instance a set might be represented as
-      various equivalent trees). *)
-
-  include RO
-
-  val add: t -> key -> value -> unit Lwt.t
-  (** [add t src dst] add a link between the key [src] and the value
-      [dst]. *)
-
-end
-
-(** Read-write stores. *)
-module type RW = sig
-
-  (** {1 Read-write stores}
-
-      Read-write stores read-only stores where it is also possible to
-      update and remove elements, with atomically guarantees. *)
-
-  include RO
 
   val set: t -> key -> value -> unit Lwt.t
   (** [set t k v] replaces the contents of [k] by [v] in [t]. If [k]
@@ -884,8 +901,7 @@ module type RW = sig
   (** [remove t k] remove the key [k] in [t]. *)
 
   val list: t -> key list Lwt.t
-  (** [list t] it the list of keys in [t]. [RW] stores are typically
-      smaller than [AO] stores, so scanning these is usually cheap. *)
+  (** [list t] it the list of keys in [t]. *)
 
   type watch
   (** The type of watch handlers. *)
@@ -1119,9 +1135,9 @@ module Contents: sig
   (** Contents store. *)
   module type STORE = sig
 
-    include AO
+    include CONTENT_ADDRESSABLE_STORE
 
-    val merge: t -> key option Merge.t
+    val merge: [`Read | `Write] t -> key option Merge.t
     (** [merge t] lifts the merge functions defined on contents values
         to contents key. The merge function will: {e (i)} read the
         values associated with the given keys, {e (ii)} use the merge
@@ -1141,11 +1157,11 @@ module Contents: sig
 
   (** [Store] creates a contents store. *)
   module Store (S: sig
-      include AO
+      include CONTENT_ADDRESSABLE_STORE
       module Key: Hash.S with type t = key
       module Val: S with type t = value
     end):
-    STORE with type t = S.t
+    STORE with type 'a t = 'a S.t
            and type key = S.key
            and type value = S.value
 
@@ -1193,10 +1209,7 @@ module Branch: sig
 
     (** {1 Branch Store} *)
 
-    include RW
-
-    val list: t -> key list Lwt.t
-    (** [list t] list all the branches present in [t]. *)
+    include ATOMIC_WRITE_STORE
 
     module Key: S with type t = key
     (** Base functions on keys. *)
@@ -1263,7 +1276,6 @@ module Private: sig
 
         @raise Invalid_argument if the key name is not made of a
         sequence of ASCII lowercase letter, digit, dash or underscore.
-        FIXME not implemented.
 
         {b Warning.} No two keys should share the same [name] as this
         may lead to difficulties in the UI. *)
@@ -1471,17 +1483,14 @@ module Private: sig
       type metadata
       (** The type for node metadata. *)
 
-      type contents
-      (** The type for contents keys. *)
-
-      type node
-      (** The type for node keys. *)
+      type hash
+      (** The type for keys. *)
 
       type step
       (** The type for steps between nodes. *)
 
-      type value = [`Node of node | `Contents of contents * metadata ]
-      (** The type for either node keys or contents keys combined with
+      type value = [`Node of hash | `Contents of hash * metadata ]
+      (** The type for either (node) keys or (contents) keys combined with
           their metadata. *)
 
       val v: (step * value) list -> t
@@ -1519,11 +1528,8 @@ module Private: sig
       val metadata_t: metadata Type.t
       (** [metadata_t] is the value type for {!metadata}. *)
 
-      val contents_t: contents Type.t
-      (** [contents_t] is the value type for {!contents}. *)
-
-      val node_t: node Type.t
-      (** [node_t] is the value type for {!node}. *)
+      val hash_t: hash Type.t
+      (** [hash_t] is the value type for {!hash}. *)
 
       val step_t: step Type.t
       (** [step_t] is the value type for {!step}. *)
@@ -1534,22 +1540,21 @@ module Private: sig
     end
 
     (** [Node] provides a simple node implementation, parameterized by
-        the contents [C], node [N], paths [P] and metadata [M]. *)
-    module Make (C: Type.S) (N: Type.S) (P: Path.S) (M: Metadata.S):
-      S with type contents = C.t
-         and type node = N.t
+        the contents and notes keys [K], paths [P] and metadata [M]. *)
+    module Make (K: Type.S) (P: Path.S) (M: Metadata.S):
+      S with type hash = K.t
          and type step = P.step
          and type metadata = M.t
 
     (** [STORE] specifies the signature for node stores. *)
     module type STORE = sig
 
-      include AO
+      include CONTENT_ADDRESSABLE_STORE
 
       module Path: Path.S
       (** [Path] provides base functions on node paths. *)
 
-      val merge: t -> key option Merge.t
+      val merge: [`Read | `Write] t -> key option Merge.t
       (** [merge] is the 3-way merge function for nodes keys. *)
 
       module Key: Hash.S with type t = key
@@ -1560,12 +1565,12 @@ module Private: sig
 
       (** [Val] provides base functions for node values. *)
       module Val: S with type t = value
-                     and type node = key
+                     and type hash = key
                      and type metadata = Metadata.t
                      and type step = Path.step
 
       (** [Contents] is the underlying contents store. *)
-      module Contents: Contents.STORE with type key = Val.contents
+      module Contents: Contents.STORE with type key = Val.hash
     end
 
     (** [Store] creates node stores. *)
@@ -1574,15 +1579,14 @@ module Private: sig
         (P: Path.S)
         (M: Metadata.S)
         (S: sig
-           include AO
+           include CONTENT_ADDRESSABLE_STORE with type key = C.key
            module Key: Hash.S with type t = key
            module Val: S with type t = value
-                          and type node = key
+                          and type hash = key
                           and type metadata = M.t
-                          and type contents = C.key
                           and type step = P.step
          end):
-      STORE with type t = C.t * S.t
+      STORE with type 'a t = 'a C.t * 'a S.t
              and type key = S.key
              and type value = S.value
              and module Path = P
@@ -1597,7 +1601,7 @@ module Private: sig
 
       (** {1 Node Graphs} *)
 
-      type t
+      type 'a t
       (** The type for store handles. *)
 
       type metadata
@@ -1620,30 +1624,30 @@ module Private: sig
       type value = [ `Node of node | `Contents of contents * metadata ]
       (** The type for store values. *)
 
-      val empty: t -> node Lwt.t
+      val empty: [> `Write] t -> node Lwt.t
       (** The empty node. *)
 
-      val v: t -> (step * value) list -> node Lwt.t
+      val v: [> `Write] t -> (step * value) list -> node Lwt.t
       (** [v t n] is a new node containing [n]. *)
 
-      val list: t -> node -> (step * value) list Lwt.t
+      val list: [> `Read] t -> node -> (step * value) list Lwt.t
       (** [list t n] is the contents of the node [n]. *)
 
-      val find: t -> node -> path -> value option Lwt.t
+      val find: [> `Read] t -> node -> path -> value option Lwt.t
       (** [find t n p] is the contents of the path [p] starting form
           [n]. *)
 
-      val update: t -> node -> path -> value -> node Lwt.t
+      val update: [`Read | `Write] t -> node -> path -> value -> node Lwt.t
       (** [update t n p v] is the node [x] such that [find t x p] is
           [Some v] and it behaves the same [n] for other
           operations. *)
 
-      val remove: t -> node -> path -> node Lwt.t
+      val remove: [`Read | `Write] t -> node -> path -> node Lwt.t
       (** [remove t n path] is the node [x] such that [find t x] is
           [None] and it behhaves then same as [n] for other
           operations. *)
 
-      val closure: t -> min:node list -> max:node list -> node list Lwt.t
+      val closure: [> `Read] t -> min:node list -> max:node list -> node list Lwt.t
       (** [closure t ~min ~max] is the transitive closure [c] of [t]'s
           nodes such that:
 
@@ -1679,7 +1683,7 @@ module Private: sig
     end
 
     module Graph (S: STORE): GRAPH
-      with type t = S.t
+      with type 'a t = 'a S.t
        and type contents = S.Contents.key
        and type metadata = S.Val.metadata
        and type node = S.key
@@ -1706,19 +1710,16 @@ module Private: sig
       type t
       (** The type for commit values. *)
 
-      type commit
-      (** Type for commit keys. *)
+      type hash
+      (** Type for keys. *)
 
-      type node
-      (** Type for node keys. *)
-
-      val v: info:Info.t -> node:node -> parents:commit list -> t
+      val v: info:Info.t -> node:hash -> parents:hash list -> t
       (** Create a commit. *)
 
-      val node: t -> node
+      val node: t -> hash
       (** The underlying node. *)
 
-      val parents: t -> commit list
+      val parents: t -> hash list
       (** The commit parents. *)
 
       val info: t -> Info.t
@@ -1729,37 +1730,34 @@ module Private: sig
       val t: t Type.t
       (** [t] is the value type for {!t}. *)
 
-      val commit_t: commit Type.t
-      (** [commit_t] is the value type for {!commit}. *)
-
-      val node_t: node Type.t
-      (** [node_t] is the value type for {!node}. *)
+      val hash_t: hash Type.t
+      (** [hash_t] is the value type for {!hash}. *)
 
     end
 
     (** [Make] provides a simple implementation of commit values,
-        parameterized by the commit [C] and node [N]. *)
-    module Make (C: Type.S) (N: Type.S):
-      S with type commit = C.t and type node = N.t
+        parameterized by the commit and node keys [K]. *)
+    module Make (K: Type.S):
+      S with type hash = K.t
 
     (** [STORE] specifies the signature for commit stores. *)
     module type STORE = sig
 
       (** {1 Commit Store} *)
 
-      include AO
+      include CONTENT_ADDRESSABLE_STORE
 
-      val merge: t -> info:Info.f -> key option Merge.t
+      val merge: [`Read | `Write] t -> info:Info.f -> key option Merge.t
       (** [merge] is the 3-way merge function for commit keys. *)
 
       module Key: Hash.S with type t = key
       (** [Key] provides base functions for commit keys. *)
 
       (** [Val] provides functions for commit values. *)
-      module Val: S with type t = value and type commit = key
+      module Val: S with type t = value and type hash = key
 
       (** [Node] is the underlying node store. *)
-      module Node: Node.STORE with type key = Val.node
+      module Node: Node.STORE with type key = Val.hash
 
     end
 
@@ -1767,13 +1765,12 @@ module Private: sig
     module Store
         (N: Node.STORE)
         (S: sig
-           include AO
+           include CONTENT_ADDRESSABLE_STORE with type key = N.key
            module Key: Hash.S with type t = key
            module Val: S with type t = value
-                          and type commit = key
-                          and type node = N.key
+                          and type hash = key
          end):
-      STORE with type t = N.t * S.t
+      STORE with type 'a t = 'a N.t * 'a S.t
              and type key = S.key
              and type value = S.value
              and module Key = S.Key
@@ -1789,7 +1786,7 @@ module Private: sig
 
       (** {1 Commit History} *)
 
-      type t
+      type 'a t
       (** The type for store handles. *)
 
       type node
@@ -1801,28 +1798,28 @@ module Private: sig
       type v
       (** The type for commit objects. *)
 
-      val v: t -> node:node -> parents:commit list -> info:Info.t ->
+      val v: [> `Write] t -> node:node -> parents:commit list -> info:Info.t ->
         (commit * v) Lwt.t
       (** Create a new commit. *)
 
-      val parents: t -> commit -> commit list Lwt.t
+      val parents: [> `Read] t -> commit -> commit list Lwt.t
       (** Get the commit parents.
 
           Commits form a append-only, fully functional, partial-order
           data-structure: every commit carries the list of its
           immediate predecessors. *)
 
-      val merge: t -> info:Info.f -> commit Merge.t
+      val merge: [`Read | `Write] t -> info:Info.f -> commit Merge.t
       (** [merge t] is the 3-way merge function for commit.  *)
 
-      val lcas: t -> ?max_depth:int -> ?n:int -> commit -> commit ->
+      val lcas: [> `Read] t -> ?max_depth:int -> ?n:int -> commit -> commit ->
         (commit list, [`Max_depth_reached | `Too_many_lcas]) result Lwt.t
       (** Find the lowest common ancestors
           {{:http://en.wikipedia.org/wiki/Lowest_common_ancestor}lca}
           between two commits. *)
 
-      val lca: t -> info:Info.f -> ?max_depth:int -> ?n:int -> commit list ->
-        (commit option, Merge.conflict) result Lwt.t
+      val lca: [`Read | `Write] t -> info:Info.f -> ?max_depth:int -> ?n:int ->
+        commit list -> (commit option, Merge.conflict) result Lwt.t
       (** Compute the lowest common ancestors ancestor of a list of
           commits by recursively calling {!lcas} and merging the
           results.
@@ -1833,12 +1830,14 @@ module Private: sig
           error. *)
 
       val three_way_merge:
-        t -> info:Info.f -> ?max_depth:int -> ?n:int -> commit -> commit ->
+        [`Read | `Write] t -> info:Info.f -> ?max_depth:int -> ?n:int ->
+        commit -> commit ->
         (commit, Merge.conflict) result Lwt.t
       (** Compute the {!lcas} of the two commit and 3-way merge the
           result. *)
 
-      val closure: t -> min:commit list -> max:commit list -> commit list Lwt.t
+      val closure: [> `Read] t -> min:commit list -> max:commit list ->
+        commit list Lwt.t
       (** Same as {{!Private.Node.GRAPH.closure}GRAPH.closure} but for
           the history graph. *)
 
@@ -1851,7 +1850,7 @@ module Private: sig
 
     (** Build a commit history. *)
     module History (S: STORE): HISTORY
-      with type t = S.t
+      with type 'a t = 'a S.t
        and type node = S.Node.key
        and type commit = S.key
 
@@ -1973,11 +1972,11 @@ module Private: sig
 
     (** Private nod store. *)
     module Node: Node.STORE
-      with type key = Hash.t and type Val.contents = Contents.key
+      with type key = Hash.t and type Val.hash = Contents.key
 
     (** Private commit store. *)
     module Commit: Commit.STORE
-      with type key = Hash.t and type Val.node = Node.key
+      with type key = Hash.t and type Val.hash = Node.key
 
     (** Private branch store. *)
     module Branch: Branch.STORE
@@ -1993,10 +1992,15 @@ module Private: sig
     module Repo: sig
       type t
       val v: config -> t Lwt.t
-      val contents_t: t -> Contents.t
-      val node_t: t -> Node.t
-      val commit_t: t -> Commit.t
+      val contents_t: t -> [`Read] Contents.t
+      val node_t: t -> [`Read] Node.t
+      val commit_t: t -> [`Read] Commit.t
       val branch_t: t -> Branch.t
+      val batch: t ->
+        ([`Read | `Write] Contents.t ->
+         [`Read | `Write] Node.t ->
+         [`Read | `Write] Commit.t
+         -> 'a Lwt.t) -> 'a Lwt.t
     end
 
     (** URI-based low-level sync. *)
@@ -2534,7 +2538,7 @@ module type S = sig
   val hash: t -> key -> hash option Lwt.t
   (** [hash t k] *)
 
-  (** {1 Udpates} *)
+  (** {1 Updates} *)
 
   (** The type for write errors.
 
@@ -2562,10 +2566,10 @@ module type S = sig
      previous results but ensure that no operation is lost in the
      history.
 
-      This function always use {Metadata.default} as metada,
-      use {!set_tree} with `[Contents (c, m)] for different ones.
+     This function always uses {!Metadata.default} as metadata.
+     Use {!set_tree} with `[Contents (c, m)] for different ones.
 
-      The result is [Error `Too_many_retries] if the concurrent
+     The result is [Error `Too_many_retries] if the concurrent
      operations do not allow the operation to commit to the underlying
      storage layer (livelock).  *)
 
@@ -2625,13 +2629,13 @@ module type S = sig
   (** [test_and_set ~test ~set] is like {!set} but it atomically
      checks that the tree is [test] before modifying it to [set].
 
-      This function always use {Metadata.default} as metada,
-      use {!test_and_set_tree} with `[Contents (c, m)] for different ones.
+     This function always uses {!Metadata.default} as metadata.
+     Use {!test_and_set_tree} with `[Contents (c, m)] for different ones.
 
-      The result is [Error (`Test t)] if the current tree is [t]
+     The result is [Error (`Test t)] if the current tree is [t]
      instead of [test].
 
-      The result is [Error `Too_many_retries] if the concurrent
+     The result is [Error `Too_many_retries] if the concurrent
      operations do not allow the operation to commit to the underlying
      storage layer (livelock). *)
 
@@ -2672,8 +2676,8 @@ module type S = sig
   (** [merge ~old] is like {!set} but merge the current tree
      and the new tree using [old] as ancestor in case of conflicts.
 
-      This function always use {Metadata.default} as metada,
-      use {!merge_tree} with `[Contents (c, m)] for different ones.
+      This function always uses {!Metadata.default} as metadata.
+      Use {!merge_tree} with `[Contents (c, m)] for different ones.
 
       The result is [Error (`Conflict c)] if the merge failed with the
       conflict [c].
@@ -2731,7 +2735,7 @@ module type S = sig
       {- if [strategy = `Set], use {!set} and discard any concurrent
          updates to [k]. }
       {- if [strategy = `Test_and_set] (default), use {!test_and_set}
-         and ensure that no concurrent operations are updating [k].
+         and ensure that no concurrent operations are updating [k]. }
       {- if [strategy = `Merge], use {!merge} and ensure
          that concurrent updates and merged with the values present
          at the beginning of the transaction. }}
@@ -3323,34 +3327,62 @@ end
     }
 *)
 
-(** [AO_MAKER] is the signature exposed by append-only store
-    backends. [K] is the implementation of keys and [V] is the
-    implementation of values. *)
-module type AO_MAKER = functor (K: Hash.S) (V: Type.S) -> sig
+(** [APPEND_ONLY_STORE_MAKER] is the signature exposed by
+    append-only store backends. [K] is the implementation of keys
+    and [V] is the implementation of values. *)
+module type APPEND_ONLY_STORE_MAKER = functor (K: Type.S) (V: Type.S) ->
+sig
 
-  include AO with type key = K.t and type value = V.t
+  include APPEND_ONLY_STORE with type key = K.t and type value = V.t
 
-  val v: config -> t Lwt.t
+  val batch: [`Read] t -> ([`Read | `Write] t -> 'a Lwt.t) -> 'a Lwt.t
+  (** [batch t f] applies the writes in [f] in a separate batch. The
+     exact guarantees depends on the backends. *)
+
+  val v: config -> [`Read] t Lwt.t
   (** [v config] is a function returning fresh store handles, with the
       configuration [config], which is provided by the backend. *)
 end
 
-(** [LINK_MAKER] is the signature exposed by store which enable adding
-    relation between keys. This is used to decouple the way keys are
-    manipulated by the Irmin runtime and the keys used for
-    storage. This is useful when trying to optimize storage for
-    random-access file operations or for encryption. *)
-module type LINK_MAKER = functor (K: Hash.S) -> sig
-  include LINK with type key = K.t and type value = K.t
-  val v: config -> t Lwt.t
+(** [CONTENT_ADDRESSABLE_STORE_MAKER] is the signature exposed by
+    content-addressable store backends. [K] is the implementation of keys
+    and [V] is the implementation of values. *)
+module type CONTENT_ADDRESSABLE_STORE_MAKER = functor (K: Hash.S) (V: Type.S) ->
+sig
+
+  include CONTENT_ADDRESSABLE_STORE with type key = K.t and type value = V.t
+
+  val batch: [`Read] t -> ([`Read | `Write] t -> 'a Lwt.t) -> 'a Lwt.t
+  (** [batch t f] applies the writes in [f] in a separate batch. The
+     exact guarantees depends on the backends. *)
+
+  val v: config -> [`Read] t Lwt.t
+  (** [v config] is a function returning fresh store handles, with the
+      configuration [config], which is provided by the backend. *)
 end
 
-(** [RW_MAKER] is the signature exposed by read-write store
-    backends. [K] is the implementation of keys and [V] is the
+module Content_addressable (S: APPEND_ONLY_STORE_MAKER) (K: Hash.S) (V: Type.S):
+sig
+  include CONTENT_ADDRESSABLE_STORE
+    with type 'a t = 'a S(K)(V).t
+     and type key = K.t
+     and type value = V.t
+
+  val batch: [`Read] t -> ([`Read | `Write] t -> 'a Lwt.t) -> 'a Lwt.t
+  (** [batch t f] applies the writes in [f] in a separate batch. The
+     exact guarantees depends on the backends. *)
+
+  val v: config -> [`Read] t Lwt.t
+  (** [v config] is a function returning fresh store handles, with the
+      configuration [config], which is provided by the backend. *)
+end
+
+(** [ATOMIC_WRITE_STORE_MAKER] is the signature exposed by atomic-write
+    store backends. [K] is the implementation of keys and [V] is the
     implementation of values.*)
-module type RW_MAKER = functor (K: Type.S) (V: Type.S) -> sig
+module type ATOMIC_WRITE_STORE_MAKER = functor (K: Type.S) (V: Type.S) -> sig
 
-  include RW with type key = K.t and type value = V.t
+  include ATOMIC_WRITE_STORE with type key = K.t and type value = V.t
 
   val v: config -> t Lwt.t
   (** [v config] is a function returning fresh store handles, with the
@@ -3358,22 +3390,25 @@ module type RW_MAKER = functor (K: Type.S) (V: Type.S) -> sig
 
 end
 
-module Make (AO: AO_MAKER) (RW: RW_MAKER): S_MAKER
+module Make
+    (CA: CONTENT_ADDRESSABLE_STORE_MAKER)
+    (AW: ATOMIC_WRITE_STORE_MAKER)
+  : S_MAKER
 (** Simple store creator. Use the same type of all of the internal
     keys and store all the values in the same store. *)
 
-module Make_ext (AO: AO_MAKER) (RW: RW_MAKER)
+module Make_ext
+    (CA: CONTENT_ADDRESSABLE_STORE_MAKER)
+    (AW: ATOMIC_WRITE_STORE_MAKER)
     (Metadata: Metadata.S)
     (Contents: Contents.S)
     (Path    : Path.S)
     (Branch  : Branch.S)
     (Hash    : Hash.S)
     (N: Private.Node.S with type metadata = Metadata.t
-                        and type contents = Hash.t
-                        and type node = Hash.t
+                        and type hash = Hash.t
                         and type step = Path.step)
-    (CT: Private.Commit.S with type node = Hash.t
-                           and type commit = Hash.t):
+    (CT: Private.Commit.S with type hash = Hash.t):
   S with type key = Path.t
      and type contents = Contents.t
      and type branch = Branch.t

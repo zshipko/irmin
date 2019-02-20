@@ -19,7 +19,7 @@ open Lwt.Infix
 let src = Logs.Src.create "irmin.mem" ~doc:"Irmin in-memory store"
 module Log = (val Logs.src_log src : Logs.LOG)
 
-module RO (K: Irmin.Type.S) (V: Irmin.Type.S) = struct
+module Read_only (K: Irmin.Type.S) (V: Irmin.Type.S) = struct
 
   module KMap = Map.Make(struct
       type t = K.t
@@ -28,9 +28,12 @@ module RO (K: Irmin.Type.S) (V: Irmin.Type.S) = struct
 
   type key = K.t
   type value = V.t
-  type t = { mutable t: value KMap.t }
+  type 'a t = { mutable t: value KMap.t }
   let map = { t = KMap.empty }
   let v _config = Lwt.return map
+
+  let cast t = (t :> [`Read | `Write] t)
+  let batch t f = f (cast t)
 
   let pp_key = Irmin.Type.pp K.t
 
@@ -45,37 +48,24 @@ module RO (K: Irmin.Type.S) (V: Irmin.Type.S) = struct
 
 end
 
-module AO (K: Irmin.Hash.S) (V: Irmin.Type.S) = struct
+module Append_only (K: Irmin.Type.S) (V: Irmin.Type.S) = struct
 
-  include RO(K)(V)
+  include Read_only(K)(V)
 
-  let add t value =
-    let str = Irmin.Type.encode_bin V.t value in
-    let key = K.digest str in
+  let add t key value =
     Log.debug (fun f -> f "add -> %a" pp_key key);
     t.t <- KMap.add key value t.t;
-    Lwt.return key
+    Lwt.return ()
 
 end
 
-module Link (K: Irmin.Hash.S) = struct
+module Atomic_write (K: Irmin.Type.S) (V: Irmin.Type.S) = struct
 
-  include RO(K)(K)
-
-  let add t index key =
-    Log.debug (fun f -> f "add link");
-    t.t <- KMap.add index key t.t;
-    Lwt.return_unit
-
-end
-
-module RW (K: Irmin.Type.S) (V: Irmin.Type.S) = struct
-
-  module RO = RO(K)(V)
+  module RO = Read_only(K)(V)
   module W = Irmin.Private.Watch.Make(K)(V)
   module L = Irmin.Private.Lock.Make(K)
 
-  type t = { t: RO.t; w: W.t; lock: L.t }
+  type t = { t: unit RO.t; w: W.t; lock: L.t }
   type key = RO.key
   type value = RO.value
   type watch = W.watch
@@ -134,7 +124,7 @@ end
 
 let config () = Irmin.Private.Conf.empty
 
-module Make = Irmin.Make(AO)(RW)
+module Make = Irmin.Make(Irmin.Content_addressable(Append_only))(Atomic_write)
 
 module KV (C: Irmin.Contents.S) =
   Make

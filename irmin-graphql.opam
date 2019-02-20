@@ -21,6 +21,7 @@ depends: [
   "graphql-lwt" {>= "0.8"}
   "graphql-cohttp" {>= "0.8"}
   "cohttp-lwt"
+  "irmin-test" {with-test}
 ]
 
 

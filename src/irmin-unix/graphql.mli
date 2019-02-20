@@ -14,5 +14,6 @@ module Server: sig
 end
 
 module Client: sig
-  module Make(S: Irmin.S) : Irmin_graphql.Client.S with module Store = S and module Client := Cohttp_lwt_unix.Client
+  module Make : Irmin.S_MAKER
+  module KV: Irmin.KV_MAKER
 end

@@ -44,28 +44,20 @@ module type CONTENTS = sig
   val merge: t option Merge.t
 end
 
-module type RO = sig
-  type t
+module type CONTENT_ADDRESSABLE_STORE = sig
+  type 'a t
   type key
   type value
-  val mem: t -> key -> bool Lwt.t
-  val find: t -> key -> value option Lwt.t
+  val mem : [> `Read] t -> key -> bool Lwt.t
+  val find: [> `Read] t -> key -> value option Lwt.t
+  val add : [> `Write] t -> value -> key Lwt.t
 end
 
-module type RO_MAKER =
-  functor (K: Type.S) ->
-  functor (V: Type.S) ->
-    RO with type key = K.t and type value = V.t
-
-module type AO = sig
-  include RO
-  val add: t -> value -> key Lwt.t
-end
-
-module type AO_MAKER = functor (K: HASH) -> functor (V: Type.S) ->
+module type CONTENT_ADDRESSABLE_STORE_MAKER = functor (K: HASH) (V: Type.S) ->
 sig
-  include AO with type key = K.t and type value = V.t
-  val v: Conf.t -> t Lwt.t
+  include CONTENT_ADDRESSABLE_STORE with type key = K.t and type value = V.t
+  val batch: [`Read] t -> ([`Read | `Write] t -> 'a Lwt.t) -> 'a Lwt.t
+  val v: Conf.t -> [`Read] t Lwt.t
 end
 
 module type METADATA = sig
@@ -75,8 +67,8 @@ module type METADATA = sig
 end
 
 module type CONTENTS_STORE = sig
-  include AO
-  val merge: t -> key option Merge.t
+  include CONTENT_ADDRESSABLE_STORE
+  val merge: [`Read | `Write] t -> key option Merge.t
   module Key: HASH with type t = key
   module Val: CONTENTS with type t = value
 end
@@ -84,10 +76,9 @@ end
 module type NODE = sig
   type t
   type metadata
-  type contents
-  type node
+  type hash
   type step
-  type value = [ `Node of node | `Contents of contents * metadata ]
+  type value = [ `Node of hash | `Contents of hash * metadata ]
   val v: (step * value) list -> t
   val list: t -> (step * value) list
   val empty: t
@@ -97,27 +88,26 @@ module type NODE = sig
   val remove: t -> step -> t
   val t: t Type.t
   val metadata_t: metadata Type.t
-  val contents_t: contents Type.t
-  val node_t: node Type.t
+  val hash_t: hash Type.t
   val step_t: step Type.t
   val value_t: value Type.t
 end
 
 module type NODE_GRAPH = sig
-  type t
+  type 'a t
   type metadata
   type contents
   type node
   type step
   type path
   type value = [ `Node of node | `Contents of contents * metadata ]
-  val empty: t -> node Lwt.t
-  val v: t -> (step * value) list -> node Lwt.t
-  val list: t -> node -> (step * value) list Lwt.t
-  val find: t -> node -> path -> value option Lwt.t
-  val update: t -> node -> path -> value -> node Lwt.t
-  val remove: t -> node -> path -> node Lwt.t
-  val closure: t -> min:node list -> max:node list -> node list Lwt.t
+  val empty: [> `Write] t -> node Lwt.t
+  val v: [> `Write] t -> (step * value) list -> node Lwt.t
+  val list: [> `Read] t -> node -> (step * value) list Lwt.t
+  val find: [> `Read] t -> node -> path -> value option Lwt.t
+  val update: [`Read | `Write] t -> node -> path -> value -> node Lwt.t
+  val remove: [`Read | `Write] t -> node -> path -> node Lwt.t
+  val closure: [> `Read] t -> min:node list -> max:node list -> node list Lwt.t
   val metadata_t: metadata Type.t
   val contents_t: contents Type.t
   val node_t: node Type.t
@@ -127,17 +117,17 @@ module type NODE_GRAPH = sig
 end
 
 module type NODE_STORE = sig
-  include AO
+  include CONTENT_ADDRESSABLE_STORE
   module Path: PATH
-  val merge: t -> key option Merge.t
+  val merge: [`Read | `Write] t -> key option Merge.t
   module Key: HASH with type t = key
   module Metadata: METADATA
   module Val: NODE
     with type t = value
-     and type node = key
+     and type hash = key
      and type metadata = Metadata.t
      and type step = Path.step
-  module Contents: CONTENTS_STORE with type key = Val.contents
+  module Contents: CONTENTS_STORE with type key = Val.hash
 end
 
 type config = Conf.t
@@ -145,55 +135,43 @@ type 'a diff = 'a Diff.t
 
 module type COMMIT = sig
   type t
-  type commit
-  type node
-  val v: info:Info.t -> node:node -> parents:commit list -> t
-  val node: t -> node
-  val parents: t -> commit list
+  type hash
+  val v: info:Info.t -> node:hash -> parents:hash list -> t
+  val node: t -> hash
+  val parents: t -> hash list
   val info: t -> Info.t
   val t: t Type.t
-  val commit_t: commit Type.t
-  val node_t: node Type.t
+  val hash_t: hash Type.t
 end
 
 module type COMMIT_STORE = sig
-  include AO
-  val merge: t -> info:Info.f -> key option Merge.t
+  include CONTENT_ADDRESSABLE_STORE
+  val merge: [`Read| `Write] t -> info:Info.f -> key option Merge.t
   module Key: HASH with type t = key
   module Val: COMMIT
     with type t = value
-     and type commit = key
-  module Node: NODE_STORE with type key = Val.node
+     and type hash = key
+  module Node: NODE_STORE with type key = Val.hash
 end
 
 module type COMMIT_HISTORY = sig
-  type t
+  type 'a t
   type node
   type commit
   type v
-  val v: t -> node:node -> parents:commit list -> info:Info.t -> (commit * v) Lwt.t
-  val parents: t -> commit -> commit list Lwt.t
-  val merge: t -> info:Info.f -> commit Merge.t
-  val lcas: t -> ?max_depth:int -> ?n:int -> commit -> commit ->
+  val v: [> `Write] t -> node:node -> parents:commit list -> info:Info.t ->
+    (commit * v) Lwt.t
+  val parents: [> `Read] t -> commit -> commit list Lwt.t
+  val merge: [`Read | `Write] t -> info:Info.f -> commit Merge.t
+  val lcas: [> `Read] t -> ?max_depth:int -> ?n:int -> commit -> commit ->
     (commit list, [`Max_depth_reached | `Too_many_lcas]) result Lwt.t
-  val lca: t -> info:Info.f -> ?max_depth:int -> ?n:int -> commit list ->
+  val lca: [`Read | `Write] t -> info:Info.f -> ?max_depth:int -> ?n:int -> commit list ->
     (commit option, Merge.conflict) result Lwt.t
-  val three_way_merge: t -> info:Info.f -> ?max_depth:int -> ?n:int ->
+  val three_way_merge: [`Read | `Write] t -> info:Info.f -> ?max_depth:int -> ?n:int ->
     commit -> commit -> (commit, Merge.conflict) result Lwt.t
-  val closure: t -> min:commit list -> max:commit list -> commit list Lwt.t
+  val closure: [> `Read] t -> min:commit list -> max:commit list -> commit list Lwt.t
   val commit_t: commit Type.t
 end
-
-module type LINK = sig
-  include AO
-  val add: t -> key -> value -> unit Lwt.t
-end
-
-module type LINK_MAKER =
-  functor (K: HASH) -> sig
-    include LINK with type key = K.t and type value = K.t
-    val v: Conf.t -> t Lwt.t
-  end
 
 module type SLICE = sig
   type t
@@ -218,8 +196,12 @@ module type BRANCH = sig
 end
 
 (** Read-write stores. *)
-module type RW = sig
-  include RO
+module type ATOMIC_WRITE_STORE = sig
+  type t
+  type key
+  type value
+  val mem: t -> key -> bool Lwt.t
+  val find: t -> key -> value option Lwt.t
   val set: t -> key -> value -> unit Lwt.t
   val test_and_set:
     t -> key -> test:value option -> set:value option -> bool Lwt.t
@@ -234,15 +216,14 @@ module type RW = sig
   val unwatch: t -> watch -> unit Lwt.t
 end
 
-module type RW_MAKER = functor (K: Type.S) -> functor (V: Type.S) ->
+module type ATOMIC_WRITE_STORE_MAKER = functor (K: Type.S) (V: Type.S) ->
 sig
-  include RW with type key = K.t and type value = V.t
+  include ATOMIC_WRITE_STORE with type key = K.t and type value = V.t
   val v: Conf.t -> t Lwt.t
 end
 
 module type BRANCH_STORE = sig
-  include RW
-  val list: t -> key list Lwt.t
+  include ATOMIC_WRITE_STORE
   module Key: BRANCH with type t = key
   module Val: HASH with type t = value
 end
@@ -266,9 +247,9 @@ module type PRIVATE = sig
   module Contents: CONTENTS_STORE
     with type key = Hash.t
   module Node: NODE_STORE
-    with type key = Hash.t and type Val.contents = Contents.key
+    with type key = Hash.t and type Val.hash = Contents.key
   module Commit: COMMIT_STORE
-    with type key = Hash.t and type Val.node = Node.key
+    with type key = Hash.t and type Val.hash = Node.key
   module Branch: BRANCH_STORE
     with type value = Commit.key
   module Slice: SLICE
@@ -278,10 +259,15 @@ module type PRIVATE = sig
   module Repo: sig
     type t
     val v: Conf.t -> t Lwt.t
-    val contents_t: t -> Contents.t
-    val node_t: t -> Node.t
-    val commit_t: t -> Commit.t
+    val contents_t: t -> [`Read] Contents.t
+    val node_t: t -> [`Read] Node.t
+    val commit_t: t -> [`Read] Commit.t
     val branch_t: t -> Branch.t
+    val batch: t ->
+      ([`Read | `Write] Contents.t ->
+       [`Read | `Write] Node.t ->
+       [`Read | `Write] Commit.t
+       -> 'a Lwt.t) -> 'a Lwt.t
   end
   module Sync: sig
     include SYNC

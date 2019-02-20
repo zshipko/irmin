@@ -29,11 +29,11 @@ let run f () =
   flush stdout
 
 let test_add_read ?(stable=false) (module AO: Test_chunk.S) () =
-  AO.create () >>= fun t ->
+  AO.v () >>= fun t ->
   let test size =
     let name = Printf.sprintf "size %d" size in
     let v = String.make size 'x' in
-    AO.add t v  >>= fun k ->
+    AO.batch t (fun t -> AO.add t v) >>= fun k ->
     if stable then (
       let str = Irmin.Type.encode_bin Test_chunk.Value.t v in
       Alcotest.(check key_t) (name ^ " is stable") k (Test_chunk.Key.digest str)
@@ -56,7 +56,7 @@ let simple =
   ]
 
 let stable =
-  let test stable = test_add_read ~stable (module Test_chunk.MemChunkStable) in
+  let test stable = test_add_read ~stable (module Test_chunk.MemChunk) in
   "stable", [
     "add/read: simple", `Quick, run @@ test false;
     "add/read: stable", `Quick, run @@ test true;

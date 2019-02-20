@@ -99,9 +99,9 @@ module Make_private
     val of_git: G.Value.t -> (t option, [`Msg of string]) result
   end
 
-  module AO (V: V) = struct
+  module Content_addressable (V: V) = struct
 
-    type t = G.t
+    type 'a t = G.t
     type key = H.t
     type value = V.t
 
@@ -155,7 +155,7 @@ module Make_private
     let to_git b = G.Value.blob (G.Value.Blob.of_string (to_string b))
   end
   module XContents = struct
-    include AO (GitContents)
+    include Content_addressable (GitContents)
     module Val = struct
       include C
 
@@ -204,23 +204,20 @@ module Make_private
       type t = G.Value.Tree.t
       let pp = G.Value.Tree.pp
       type metadata = Metadata.t
-      type contents = Contents.key
-      type node = Key.t
+      type hash = Key.t
       type step = Path.step
-      type value = [`Node of node | `Contents of contents * metadata ]
+      type value = [`Node of hash | `Contents of hash * metadata ]
       let metadata_t = Metadata.t
-      let contents_t = Contents.Key.t
-      let node_t = Key.t
+      let hash_t = Key.t
       let step_t = Path.step_t
 
       let value_t =
         let open Irmin.Type in
-        let contents_t = pair contents_t metadata_t in
         variant "Tree.value" (fun node contents -> function
             | `Node n     -> node n
             | `Contents c -> contents c)
-        |~ case1 "node"     node_t     (fun n -> `Node n)
-        |~ case1 "contents" contents_t (fun c -> `Contents c)
+        |~ case1 "node"     hash_t     (fun n -> `Node n)
+        |~ case1 "contents" (pair hash_t metadata_t) (fun c -> `Contents c)
         |> sealv
 
       let of_step = Irmin.Type.to_string P.step_t
@@ -292,7 +289,7 @@ module Make_private
               (to_step name, mk_c node perm) :: acc
           ) [] (G.Value.Tree.to_list t)
 
-       module N = Irmin.Private.Node.Make (H)(H)(P)(Metadata)
+       module N = Irmin.Private.Node.Make(H)(P)(Metadata)
        let to_n t = N.v (alist t)
        let of_n n = v (N.list n)
 
@@ -323,7 +320,7 @@ module Make_private
          Irmin.Type.like ~bin:(encode_bin, decode_bin, size_of) N.t of_n to_n
     end
 
-    include AO (struct
+    include Content_addressable (struct
         type t = Val.t
         let pp = Val.pp
         let type_eq = function `Tree -> true | _ -> false
@@ -338,11 +335,9 @@ module Make_private
       type t = G.Value.Commit.t
       let pp = G.Value.Commit.pp
 
-      type commit = H.t
-      type node = H.t
+      type hash = H.t
 
-      let commit_t = H.t
-      let node_t = H.t
+      let hash_t = H.t
 
       let info_of_git author message =
         let id = author.Git.User.name in
@@ -403,7 +398,7 @@ module Make_private
         let message = G.Value.Commit.message g in
         info_of_git author message
 
-      module C = Irmin.Private.Commit.Make(H)(H)
+      module C = Irmin.Private.Commit.Make(H)
 
       let of_c c = to_git (C.info c) (C.node c) (C.parents c)
 
@@ -440,7 +435,7 @@ module Make_private
 
     module Key = H
 
-    include AO (struct
+    include Content_addressable (struct
         type t = Val.t
         let pp = Val.pp
         let type_eq = function `Commit -> true | _ -> false
@@ -490,7 +485,13 @@ module Irmin_branch_store
     m: Lwt_mutex.t;
   }
 
-  let watches = Hashtbl.create 10
+  module E = Ephemeron.K1.Make (struct
+    type t = Fpath.t
+    let equal = fun x y -> compare x y = 0
+    let hash = Hashtbl.hash
+  end)
+
+  let watches = E.create 10
 
   type key = Key.t
   type value = Val.t
@@ -569,11 +570,10 @@ module Irmin_branch_store
         | Ok r             -> Lwt.return r
     end >|= fun git_head ->
     let w =
-      try Hashtbl.find watches (G.dotgit t)
+      try E.find watches (G.dotgit t)
       with Not_found ->
         let w = W.v () in
-        (* FIXME: we might want to use a weak table *)
-        Hashtbl.add watches (G.dotgit t) w;
+        E.add watches (G.dotgit t) w;
         w
     in
     { git_head; bare; t; w; dot_git; m }
@@ -847,6 +847,8 @@ module Make_ext
       let node_t t = contents_t t, t.g
       let commit_t t = node_t t, t.g
 
+      let batch t f = f (contents_t t) (node_t t) (commit_t t)
+
       type config = {
         root   : string;
         dot_git: string option;
@@ -910,13 +912,19 @@ module Mem = struct
 
   include Git.Mem.Store
 
-  let confs = Hashtbl.create 10 (* XXX: should probably be a weak table *)
+  module E = Ephemeron.K1.Make (struct
+    type t = Fpath.t  * Fpath.t option * int option * buffer Lwt_pool.t option
+    let equal = fun x y -> compare x y = 0
+    let hash = Hashtbl.hash
+  end)
 
-  let find_conf c = match Hashtbl.find confs c with
+  let confs = E.create 10
+
+  let find_conf c = match E.find confs c with
     | exception Not_found -> None
     | x -> Some x
 
-  let add_conf c t = Hashtbl.replace confs c t; t
+  let add_conf c t = E.replace confs c t; t
 
   let v' ?dotgit ?compression ?buffers root =
     let buffer = match buffers with
@@ -969,7 +977,7 @@ module No_sync (G: Git.S) = struct
   let update_and_create _ = assert false
 end
 
-module AO (G: Git.S) (V: Irmin.Type.S) = struct
+module Content_addressable (G: Git.S) (V: Irmin.Type.S) = struct
   module G = struct
     include G
     let v ?dotgit:_ ?compression:_ ?buffers:_ _root =
@@ -984,7 +992,7 @@ module AO (G: Git.S) (V: Irmin.Type.S) = struct
   let state t =
     M.repo_of_git t >|= fun r ->
     M.Private.Repo.contents_t r
-  type t = G.t
+  type 'a t = G.t
   type key = X.key
   type value = X.value
   let with_state f t x = state t >>= fun t -> f t x
@@ -993,7 +1001,7 @@ module AO (G: Git.S) (V: Irmin.Type.S) = struct
   let mem = with_state X.mem
 end
 
-module RW (G: Git.S) (K: Irmin.Branch.S) =
+module Atomic_write (G: Git.S) (K: Irmin.Branch.S) =
 struct
   module K = struct
     include K
@@ -1056,8 +1064,8 @@ module type REF_MAKER = functor
 include Conf
 
 module Generic
-    (AO: Irmin.AO_MAKER)
-    (RW: Irmin.RW_MAKER)
+    (CA: Irmin.CONTENT_ADDRESSABLE_STORE_MAKER)
+    (AW: Irmin.ATOMIC_WRITE_STORE_MAKER)
     (C : Irmin.Contents.S)
     (P : Irmin.Path.S)
     (B : Irmin.Branch.S)
@@ -1069,7 +1077,7 @@ module Generic
   module S = Make(G)(No_sync(G))(C)(P)(B)
 
   include
-    Irmin.Make_ext(AO)(RW)
+    Irmin.Make_ext(CA)(AW)
       (S.Private.Node.Metadata)
       (S.Private.Contents.Val)
       (S.Private.Node.Path)
@@ -1080,7 +1088,7 @@ module Generic
 end
 
 module Generic_KV
-    (AO: Irmin.AO_MAKER)
-    (RW: Irmin.RW_MAKER)
+    (CA: Irmin.CONTENT_ADDRESSABLE_STORE_MAKER)
+    (AW: Irmin.ATOMIC_WRITE_STORE_MAKER)
     (C : Irmin.Contents.S)
-  = Generic (AO)(RW)(C)(Irmin.Path.String_list)(Irmin.Branch.String)
+  = Generic (CA)(AW)(C)(Irmin.Path.String_list)(Irmin.Branch.String)

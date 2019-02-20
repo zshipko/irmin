@@ -17,7 +17,24 @@
 open Lwt.Infix
 
 module Store = Irmin_unix.Git.Mem.KV(Irmin.Contents.String)
-module Client = Irmin_unix.Graphql.Client.Make(Store)
+module Disk = Irmin_unix.Git.FS.KV(Irmin.Contents.String)
+module Client =
+  Irmin_unix.Graphql.Client.Make
+    (Irmin_git.Metadata)
+    (Irmin.Contents.String)
+    (Irmin.Path.String_list)
+    (Irmin.Branch.String)
+    (Irmin.Hash.SHA1)
+
+
+(*let init_test_repo branch =
+  let info = Irmin_unix.info in
+  let test_repo_cfg = Irmin_git.config "_test_repo" in
+  Disk.Repo.v test_repo_cfg >>= fun repo -> Disk.of_branch repo branch >>= fun t ->
+  Disk.set_exn t ~info:(info "a") ["a"] (branch ^ "1") >>= fun () ->
+  Disk.set_exn t ~info:(info "b") ["b"] (branch ^ "2") >>= fun () ->
+  Disk.set_exn t ~info:(info "c") ["c"] (branch ^ "3") >>= fun () ->
+  Disk.set_exn t ~info:(info "d") ["d"] (branch ^ "4") >>= fun () -> Lwt.return_unit *)
 
 (* See https://github.com/mirage/ocaml-cohttp/issues/511 *)
 let () = Lwt.async_exception_hook := (fun e ->
@@ -33,7 +50,7 @@ let rec wait_for_the_server_to_start () =
     let line = input_line ic in
     close_in ic;
     let pid = int_of_string line in
-    Logs.debug (fun l -> l "read PID %d fomr %s" pid pid_file);
+    Logs.debug (fun l -> l "read PID %d from %s" pid pid_file);
     Unix.unlink pid_file;
     Unix.sleep 1;
     pid
@@ -53,7 +70,7 @@ let check_type_eq name t a b =
 let check_type_not_eq name t a b =
   Alcotest.(check bool) name false (Irmin.Type.equal t a b)
 
-let test_set_get branch client =
+(*let test_set_get branch client =
   Client.set ~branch client ["a"; "b"; "c"] "123" >>= unwrap >>= fun _ ->
   Client.get ~branch client ["a"; "b"; "c"] >>= unwrap >>= fun s ->
   Client.set ~branch client ["foo"] "bar" >>= unwrap >>= fun _ ->
@@ -104,18 +121,25 @@ let test_merge branch client =
     Alcotest.(check string) "merge" "abc" x
   | Error (`Msg msg) -> Alcotest.fail msg
 
+let repo_path =
+  let p = Unix.getcwd () / "_test_repo" in
+  "file://" ^ p
+
 let test_clone branch client =
-  Client.clone ~branch client "git://github.com/zshipko/irmin-tutorial" >|= function
-  | Ok _ -> ()
-  | Error (`Msg msg) -> Alcotest.failf "clone: %s" msg
+  (Client.clone ~branch client repo_path >>= function
+  | Ok _ -> Lwt.return_unit
+  | Error (`Msg msg) -> Alcotest.failf "clone: %s" msg)
 
 let test_pull branch client =
   (* See https://github.com/mirage/irmin/issues/600 *)
   if branch <> "master" then Lwt.return_unit
   else
-    Client.pull ~branch client "git://github.com/mirage/irmin" >|= function
-    | Ok _ -> ()
-    | Error (`Msg msg) -> Alcotest.failf "pull: %s" msg
+    (Client.pull ~branch client repo_path >>= function
+    | Ok _ -> Lwt.return_unit
+    | Error (`Msg msg) -> Alcotest.failf "pull: %s" msg) >>= fun () ->
+    Client.get ~branch client ["d"] >|= function
+    | Ok x -> Alcotest.(check string) "after pull" (branch ^ "4") x
+    | Error (`Msg msg) -> Alcotest.failf "after pull error: %s" msg
 
 let test_set_get_all branch client =
   let key = ["x"] in
@@ -158,72 +182,118 @@ let test_lca branch client =
     let commit = List.hd commit.parents in
     (Client.lca ~branch client commit >|= function
       | Ok commits ->
-          Alcotest.(check bool) "LCA" true
-            (List.exists (fun x -> x.Client.hash = commit) commits)
+        Alcotest.(check bool) "LCA" true
+          (List.exists (fun x -> x.Client.hash = commit) commits)
       | Error (`Msg msg) -> Alcotest.failf "branch_info: %s" msg)
   | Error (`Msg msg) -> Alcotest.failf "branch_info: %s" msg
 
-(* test_push exists to check the syntax of the `push` query since actually testing this
- * would be too difficult *)
 let test_push branch client =
-  Client.push client ~branch "https://github.com/fake/repo" >|= function
-  | Ok _ -> Alcotest.fail "push is expected to fail"
-  | Error (`Msg _) ->  ()
+  let remote = "file://" ^ (Unix.getcwd () / "_push") in
+  Client.push client ~branch remote >|= function
+  | Ok _ -> ()
+  | Error (`Msg msg) -> Alcotest.failf "push: %s" msg
 
 let tests = [
- "set/get", `Quick, test_set_get;
- "branch_info/commit_info", `Quick, test_head;
- "remove", `Quick, test_remove;
- "tree", `Quick, test_tree;
- "clone", `Quick, test_clone;
- "pull", `Quick, test_pull;
- "merge", `Quick, test_merge;
- "set_all/get_all", `Quick, test_set_get_all;
- "branches", `Quick, test_branches;
- "snapshot/revert", `Quick, test_snapshot_revert;
- "lca", `Quick, test_lca;
- "push", `Quick, test_push;
-]
+  "set/get", `Quick, test_set_get;
+  "branch_info/commit_info", `Quick, test_head;
+  "remove", `Quick, test_remove;
+  "tree", `Quick, test_tree;
+  "clone", `Quick, test_clone;
+  "pull", `Quick, test_pull;
+  "merge", `Quick, test_merge;
+  "set_all/get_all", `Quick, test_set_get_all;
+  "branches", `Quick, test_branches;
+  "snapshot/revert", `Quick, test_snapshot_revert;
+  "lca", `Quick, test_lca;
+  "push", `Quick, test_push;
+]*)
 
 let uri = Uri.of_string "http://localhost:80808/graphql"
 
-let run_tests name tests =
- let client = Client.init uri in
- let tests branch =
-   List.map (fun (name, speed, f) ->
-       branch ^ ":" ^ name, speed, (fun () -> Lwt_main.run (Lwt_unix.on_signal Sys.sigint (fun _ -> exit 0) |> ignore; f branch client))) tests
- in
- let a = tests "master" in
- let b = tests "gh-pages" in
- Alcotest.run name [name, a @ b]
+(*let run_tests name tests =
+  let client = Client.init uri in
+  let tests branch =
+    List.map (fun (name, speed, f) ->
+        let f () =
+          ignore (Lwt_unix.on_signal Sys.sigint (fun _ -> exit 0));
+          init_test_repo branch >>= fun () ->
+          f branch client
+        in
+        branch ^ ":" ^ name, speed, (fun () -> Lwt_main.run (f ()))
+      ) tests
+  in
+  let a = tests "master" in
+  let b = tests "testing" in
+  Alcotest.run name [name, a @ b] *)
 
 let server_pid = ref 0
 
-let clean () =
- Unix.kill !server_pid Sys.sigint
+let clean () = Unix.kill !server_pid Sys.sigint
+
+let graphql_store (module S: Irmin_test.S) =
+  Irmin_test.store (module Irmin_unix.Graphql.Client.Make) (module S.Metadata)
+
+let suite server =
+  let open Irmin_test in
+  { name = Printf.sprintf "GRAPHQL.%s" server.name;
+
+    init = begin fun () ->
+      let _ = Sys.command (Printf.sprintf "dune exec -- %s server & echo $! > %s" Sys.argv.(0) pid_file) in
+      let () = server_pid := wait_for_the_server_to_start () in
+      Lwt_io.flush_all ()
+    end;
+
+    stats = None;
+    clean = begin fun () ->
+      Lwt.return (clean ())
+    end;
+
+    config = Irmin_graphql.Client.config uri;
+    store = graphql_store server.store;
+  }
+
+let suites servers =
+  if Sys.os_type = "Win32" then
+    (* it's a bit hard to test client/server stuff on windows because
+       we can't fork. Can work around that later if needed. *)
+    []
+  else
+    List.map (fun (s, server) ->
+        s, suite server
+      ) servers
 
 let run_server () =
- let module Server = Irmin_unix.Graphql.Server.Make(Store)(struct let remote = Some Store.remote end) in
- let server =
-   Lwt_unix.on_signal Sys.sigint (fun _ -> exit 0) |> ignore;
-   Store.Repo.v (Irmin_mem.config ()) >>= Store.master >>= fun t ->
-   server_pid := Unix.getpid ();
-   Conduit_lwt_unix.set_max_active 100;
-   let server = Server.server t in
-   Cohttp_lwt_unix.Server.create ~mode:(`TCP (`Port 80808)) server
- in
- Lwt_main.run server
+  let module Server = Irmin_unix.Graphql.Server.Make(Store)(struct let remote = Some (fun ?headers r ->
+      let uri = Uri.of_string r in
+      match Uri.scheme uri with
+      | Some "file" ->
+        let cfg = Irmin_git.config (Uri.path uri) in
+        let store = Lwt_main.run (Disk.Repo.v cfg >>= Disk.master) in
+        Irmin.remote_store (module Disk) store
+      | _ -> Store.remote ?headers r)
+    end) in
+  let server =
+    Lwt_unix.on_signal Sys.sigint (fun _ -> exit 0) |> ignore;
+    Store.Repo.v (Irmin_mem.config ()) >>= Store.master >>= fun t ->
+    server_pid := Unix.getpid ();
+    Conduit_lwt_unix.set_max_active 100;
+    let server = Server.server t in
+    Cohttp_lwt_unix.Server.create ~mode:(`TCP (`Port 80808)) server
+  in
+  Lwt_main.run server
+
+let servers = [
+  `Quick, Test_mem.suite;
+  `Quick, Test_git.suite;
+]
 
 let run () =
- if Sys.os_type = "Win32" then
-   (* it's a bit hard to test client/server stuff on windows because
-      we can't fork. Can work around that later if needed. *)
-   exit 0
- else
- if (Array.length Sys.argv > 1 && Sys.argv.(1) = "server") then
-   run_server ()
- else
-   let () = at_exit clean in
-   let _ = Sys.command (Printf.sprintf "dune exec -- %s server & echo $! > %s" Sys.argv.(0) pid_file) in
-   let () = server_pid := wait_for_the_server_to_start () in
-   run_tests "GRAPHQL" tests
+  if Sys.os_type = "Win32" then
+    (* it's a bit hard to test client/server stuff on windows because
+       we can't fork. Can work around that later if needed. *)
+    exit 0
+  else
+  if (Array.length Sys.argv > 1 && Sys.argv.(1) = "server") then
+    run_server ()
+  else
+    Irmin_test.Store.run "irmin-graphql" ~misc:[] (suites servers)

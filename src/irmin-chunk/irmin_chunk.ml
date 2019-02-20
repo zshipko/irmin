@@ -16,7 +16,6 @@
  *)
 
 open Lwt.Infix
-open Irmin
 
 let src = Logs.Src.create "irmin.chunk" ~doc:"Irmin chunks"
 module Log = (val Logs.src_log src : Logs.LOG)
@@ -111,17 +110,21 @@ module Chunk (K: Irmin.Hash.S) = struct
 
 end
 
-module AO (S:AO_MAKER) (K:Irmin.Hash.S) (V: Irmin.Type.S) = struct
+module Content_addressable
+    (S:Irmin.APPEND_ONLY_STORE_MAKER)
+    (K:Irmin.Hash.S) (V: Irmin.Type.S) =
+struct
 
   module Chunk = Chunk(K)
 
   module AO = S(K)(Chunk)
-  type key = AO.key
+  module CA = Irmin.Content_addressable(S)(K)(Chunk)
+  type key = CA.key
   type value = V.t
 
-  type t = {
+  type 'a t = {
     chunking    : [`Max | `Best_fit];
-    db          : AO.t;             (* An handler to the underlying database. *)
+    db          : 'a CA.t;          (* An handler to the underlying database. *)
     chunk_size  : int;                                 (* the size of chunks. *)
     max_children: int;     (* the maximum number of children a node can have. *)
     max_data    : int; (* the maximum length (in bytes) of data stored in one
@@ -148,7 +151,7 @@ module AO (S:AO_MAKER) (K:Irmin.Hash.S) (V: Irmin.Type.S) = struct
         | Chunk.Data  d -> Lwt.return (d :: acc)
         | Chunk.Index i ->
           Lwt_list.fold_left_s (fun acc key ->
-              AO.find t.db key >>= function
+              CA.find t.db key >>= function
               | None   -> Lwt.return acc
               | Some v -> aux acc v
             ) acc i
@@ -167,7 +170,7 @@ module AO (S:AO_MAKER) (K:Irmin.Hash.S) (V: Irmin.Type.S) = struct
       in
       aux [] 0 [] l
 
-    let add t l =
+    let add t ~key l =
       let rec aux = function
         | []  -> invalid_arg "Irmin_chunk.Tree.add"
         | [k] -> Lwt.return k
@@ -177,11 +180,9 @@ module AO (S:AO_MAKER) (K:Irmin.Hash.S) (V: Irmin.Type.S) = struct
             then t.max_children
             else List.length l
           in
-          let l = list_partition n l in
-          Lwt_list.map_p (fun i ->
-              AO.add t.db (index t i)
-            ) l >>=
-          aux
+          match list_partition n l with
+          | [i] -> AO.add t.db key (index t i) >|= fun () -> key
+          | l   -> Lwt_list.map_p (fun i -> CA.add t.db (index t i) ) l >>= aux
       in
       aux l
 
@@ -201,17 +202,28 @@ module AO (S:AO_MAKER) (K:Irmin.Hash.S) (V: Irmin.Type.S) = struct
       (fun l ->
          l "config: chunk-size=%d digest-size=%d max-data=%d max-children=%d"
            chunk_size K.digest_size max_data max_children);
-    AO.v config >|= fun db ->
+    CA.v config >|= fun db ->
     { chunking; db; chunk_size; max_children; max_data }
+
+  let batch t f = CA.batch t.db (fun db -> f { t with db })
 
   let find_leaves t key =
     AO.find t.db key >>= function
     | None    -> Lwt.return []
     | Some x  -> Tree.find_leaves t x
 
+  let check_hash k v =
+    let k'= K.digest v in
+    if Irmin.Type.equal K.t k k' then Lwt.return ()
+    else
+      let pp_key = Irmin.Type.pp K.t in
+      Fmt.kstrf Lwt.fail_invalid_arg
+        "corrupted value: got %a, expecting %a" pp_key k' pp_key k
+
   let find t key =
-    find_leaves t key >|= fun bufs ->
+    find_leaves t key >>= fun bufs ->
     let buf = String.concat "" bufs in
+    check_hash key buf >|= fun () ->
     match Irmin.Type.decode_bin V.t buf with
     |Ok va   -> Some va
     |Error _ -> None
@@ -227,57 +239,24 @@ module AO (S:AO_MAKER) (K:Irmin.Hash.S) (V: Irmin.Type.S) = struct
 
   let add t v =
     let buf = Irmin.Type.encode_bin V.t v in
+    let key = K.digest buf in
     let len = String.length buf in
     if len <= t.max_data then (
-      AO.add t.db (data t buf) >|= fun k ->
-      Log.debug (fun l -> l "add -> %a (no split)" pp_key k);
-      k
+      AO.add t.db key (data t buf) >|= fun () ->
+      Log.debug (fun l -> l "add -> %a (no split)" pp_key key);
+      key
     ) else (
       let offs = list_range ~init:0 ~stop:len ~step:t.max_data in
       let aux off =
         let len = min t.max_data (String.length buf - off) in
         let payload = String.sub buf off len in
-        AO.add t.db (data t payload)
+        CA.add t.db (data t payload)
       in
-      Lwt_list.map_s aux offs >>= Tree.add t >|= fun k ->
+      Lwt_list.map_s aux offs >>= Tree.add ~key t >|= fun k ->
       Log.debug (fun l -> l "add -> %a (split)" pp_key k);
-      k
+      key
     )
 
-  let mem t key = AO.mem t.db key
-
-end
-
-module AO_stable (L: LINK_MAKER) (S: AO_MAKER) (K: Hash.S) (V: Irmin.Type.S) =
-struct
-
-  module AO = AO(S)(K)(V)
-  module Link = L(K)
-
-  type key = K.t
-  type value = V.t
-  type t = { ao: AO.t; link: Link.t }
-
-  let v config =
-    AO.v config >>= fun ao ->
-    Link.v config >|= fun link ->
-    { ao; link; }
-
-  let find t k =
-    Link.find t.link k >>= function
-    | None   -> Lwt.return_none
-    | Some k -> AO.find t.ao k
-
-  let mem t k =
-    Link.find t.link k >>= function
-    | None   -> Lwt.return_false
-    | Some k -> AO.mem t.ao k
-
-  let add t v =
-    AO.add t.ao v >>= fun k' ->
-    let v = Irmin.Type.encode_bin V.t v in
-    let k = K.digest v in
-    Link.add t.link k k' >|= fun () ->
-    k
+  let mem t key = CA.mem t.db key
 
 end

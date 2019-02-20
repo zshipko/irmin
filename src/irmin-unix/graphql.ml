@@ -14,5 +14,6 @@ module Server = struct
 end
 
 module Client = struct
-  module Make(Store: Irmin.S) = Irmin_graphql.Client.Make(Cohttp_lwt_unix.Client)(Store)
+  module Make: Irmin.S_MAKER = Irmin_graphql.Client.Make(Cohttp_lwt_unix.Client)
+  module KV: Irmin.KV_MAKER = Irmin_graphql.Client.KV(Cohttp_lwt_unix.Client)
 end

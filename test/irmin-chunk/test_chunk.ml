@@ -32,32 +32,33 @@ module Value = struct
 end
 
 module type S = sig
-  include Irmin.AO with type key = Key.t and type value = Value.t
-  val create: unit -> t Lwt.t
+  include Irmin.CONTENT_ADDRESSABLE_STORE
+    with type key = Key.t and type value = Value.t
+  val v: unit -> [`Read] t Lwt.t
+  val batch: [`Read] t -> ([`Read|`Write] t -> 'a Lwt.t) -> 'a Lwt.t
 end
 
+module Append_only = Irmin_mem.Append_only
+module Content_addressable = Irmin.Content_addressable(Append_only)
+
 module Mem = struct
-  include Irmin_mem.AO(Key)(Value)
-  let create () = v @@ Irmin_mem.config ()
+  include Content_addressable(Key)(Value)
+  let v () = v @@ Irmin_mem.config ()
 end
 
 module MemChunk = struct
-  include Irmin_chunk.AO(Irmin_mem.AO)(Key)(Value)
+  include Content_addressable(Key)(Value)
   let small_config = Irmin_chunk.config ~min_size:44 ~size:44 ()
-  let create () = v small_config
-end
-
-module MemChunkStable = struct
-  include Irmin_chunk.AO_stable(Irmin_mem.Link)(Irmin_mem.AO)(Key)(Value)
-  let small_config = Irmin_chunk.config ~min_size:44 ~size:44 ()
-  let create () = v small_config
+  let v () = v small_config
 end
 
 let init () =
   Lwt.return_unit
 
 let store = Irmin_test.store
-  (module Irmin.Make(Irmin_chunk.AO(Irmin_mem.AO))(Irmin_mem.RW))
+    (module Irmin.Make
+         (Irmin_chunk.Content_addressable(Append_only))
+         (Irmin_mem.Atomic_write))
   (module Irmin.Metadata.None)
 
 let config = Irmin_chunk.config ()

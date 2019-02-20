@@ -26,6 +26,14 @@ let set = {|
   }
 |}
 
+let test_and_set = {|
+  mutation TestAndSet($branch: BranchName!, $key: Key!, $test: Value!, $set: Value!, $info: InfoInput) {
+    test_and_set(branch: $branch, key: $key, test: $test, set: $set, info: $info) {
+      hash
+    }
+  }
+|}
+
 let update_tree = {|
   mutation UpdateTree($branch: BranchName!, $key: Key!, $tree: [TreeItem]!, $info: InfoInput) {
     update_tree(branch: $branch, key: $key, tree: $tree, info: $info) {
@@ -51,8 +59,32 @@ let remove = {|
 |}
 
 let merge = {|
-  mutation Merge($branch: BranchName, $from: BranchName!, $info: InfoInput) {
-      merge(branch: $branch, from: $from, info: $info) {
+  mutation Merge($branch: BranchName, $key: Key!, $value: Value, $old: Value, $info: InfoInput) {
+      merge(branch: $branch, info: $info, key: $key, value: $value, old: $old) {
+          hash
+      }
+  }
+|}
+
+let merge_tree = {|
+  mutation MergeTree($branch: BranchName, $key: Key!, $value: [TreeItem], $old: [TreeItem], $info: InfoInput) {
+      merge_tree(branch: $branch, info: $info, key: $key, value: $value, old: $old) {
+          hash
+      }
+  }
+|}
+
+let merge_with_branch = {|
+  mutation MergeWithBranch($branch: BranchName, $from: BranchName!, $info: InfoInput, $max_depth: Int, $n: Int) {
+      merge_with_branch(branch: $branch, from: $from, info: $info, max_depth: $max_depth, n: $n) {
+          hash
+      }
+  }
+|}
+
+let merge_with_commit = {|
+  mutation MergeWithCommit($branch: BranchName, $from: CommitHash!, $info: InfoInput, $max_depth: Int, $n: Int) {
+      merge_with_commit(branch: $branch, from: $from, info: $info, max_depth: $max_depth, n: $n) {
           hash
       }
   }
@@ -65,8 +97,8 @@ let push = {|
 |}
 
 let pull = {|
-  mutation Pull($branch: BranchName, $remote: Remote!, $info: InfoInput) {
-    pull(branch: $branch, remote: $remote, info: $info) {
+  mutation Pull($branch: BranchName, $remote: Remote!, $info: InfoInput, $depth: Int) {
+    pull(branch: $branch, remote: $remote, info: $info, depth: $depth) {
       hash
     }
   }
@@ -141,12 +173,40 @@ let commit_info = {|
   }
 |}
 
-let branches = "query { branches }"
+let branches = {|
+  query {
+    branches {
+      name,
+      head {
+        hash,
+        info {
+          message,
+          author,
+          date
+        }
+        parents {
+          hash
+        }
+      }
+    }
+  }
+|}
+
+let list = {|
+  query List($branch: BranchName!, $key: Key) {
+    branch(name: $branch) {
+      list(key: $key)
+    }
+  }
+|}
+
+let set_branch = "mutation SetBranch($branch: BranchName!, $commit: CommitHash!) { set_branch(branch: $branch, commit: $commit) }"
+let remove_branch = "mutation RemoveBranch($branch: BranchName!) { remove_branch(branch: $branch) }"
 
 let get_all = {|
   query GetAll($branch: BranchName!, $key: Key!) {
       branch(name: $branch) {
-          get_all(key: $key) {
+          find_all(key: $key) {
               value
               metadata
           }
@@ -164,20 +224,15 @@ let set_all = {|
 |}
 
 
-let list =  {|
-  query List($branch: BranchName!, $step: Step!) {
-      branch(name: $branch) {
-          head {
-              node {
-                  get(step: $step) {
-                      tree {
-                          key,
-                          value
-                      }
-                  }
-              }
-          }
-      }
+let find_object = {|
+  query FindObject($hash: ObjectHash!) {
+    find_object(hash: $hash)
+  }
+|}
+
+let find_tree = {|
+  query FindTree($hash: ObjectHash!) {
+    find_tree(hash: $hash)
   }
 |}
 
@@ -190,6 +245,9 @@ let all = [
   "set_tree", set_tree;
   "remove", remove;
   "merge", merge;
+  "merge_tree", merge_tree;
+  "merge_with_branch", merge_with_branch;
+  "merge_with_commit", merge_with_commit;
   "push", push;
   "pull", pull;
   "clone", clone;
@@ -201,6 +259,10 @@ let all = [
   "get_all", get_all;
   "set_all", set_all;
   "list", list;
+  "set_branch", set_branch;
+  "remove_branch", remove_branch;
+  "find_object", find_object;
+  "find_tree", find_tree;
 ]
 
 let generate_json () =

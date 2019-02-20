@@ -49,13 +49,14 @@ let root_key = Irmin.Private.Conf.root
 let config ?(config=Irmin.Private.Conf.empty) root =
   Irmin.Private.Conf.add config root_key (Some root)
 
-module RO_ext (IO: IO) (S: Config) (K: Irmin.Type.S) (V: Irmin.Type.S) = struct
+module Read_only_ext (IO: IO) (S: Config) (K: Irmin.Type.S) (V: Irmin.Type.S) =
+struct
 
   type key = K.t
 
   type value = V.t
 
-  type t = {
+  type 'a t = {
     path: string;
   }
 
@@ -67,6 +68,9 @@ module RO_ext (IO: IO) (S: Config) (K: Irmin.Type.S) (V: Irmin.Type.S) = struct
     let path = get_path config in
     IO.mkdir path >|= fun () ->
     { path }
+
+  let cast t = (t :> [`Read | `Write] t)
+  let batch t f = f (cast t)
 
   let file_of_key { path; _ } key =
     path / S.file_of_key (Irmin.Type.to_string K.t key)
@@ -115,73 +119,62 @@ module RO_ext (IO: IO) (S: Config) (K: Irmin.Type.S) (V: Irmin.Type.S) = struct
 
 end
 
-module AO_ext (IO: IO) (S: Config) (K: Irmin.Hash.S) (V: Irmin.Type.S) = struct
+module Append_only_ext
+    (IO: IO)
+    (S: Config)
+    (K: Irmin.Type.S)
+    (V: Irmin.Type.S) =
+struct
 
-  include RO_ext(IO)(S)(K)(V)
+  include Read_only_ext(IO)(S)(K)(V)
 
   let temp_dir t = t.path / "tmp"
 
-  let add t value =
-    let str = Irmin.Type.encode_bin V.t value in
-    let key = K.digest str in
+  let add t key value =
     Log.debug (fun f -> f "add %a" pp_key key);
     let file = file_of_key t key in
     let temp_dir = temp_dir t in
-    (IO.file_exists file >>= function
-      | true  -> Lwt.return_unit
-      | false ->
-        Lwt.catch
-          (fun () -> IO.write_file ~temp_dir file str)
-          (fun e -> Lwt.fail e))
-    >|= fun () ->
-    key
+    IO.file_exists file >>= function
+    | true  -> Lwt.return_unit
+    | false ->
+      let str = Irmin.Type.encode_bin V.t value in
+      IO.write_file ~temp_dir file str
 
 end
 
-module Link_ext (IO: IO) (S: Config) (K:Irmin.Hash.S) = struct
+module Atomic_write_ext
+    (IO: IO)
+    (S: Config)
+    (K: Irmin.Type.S)
+    (V: Irmin.Type.S) =
+struct
 
- include RO_ext(IO)(S)(K)(K)
-
- let temp_dir t = t.path / "tmp"
-
- let add t index key =
-   Log.debug (fun f -> f "add link");
-   let file = file_of_key t index in
-   let value = Irmin.Type.encode_bin K.t key in
-   let temp_dir = temp_dir t in
-   IO.file_exists file >>= function
-   | true  -> Lwt.return_unit
-   | false ->
-     Lwt.catch
-       (fun () -> IO.write_file ~temp_dir file value)
-       (fun e -> Lwt.fail e)
-
-end
-
-module RW_ext (IO: IO) (S: Config) (K: Irmin.Type.S) (V: Irmin.Type.S) = struct
-
-  module RO = RO_ext(IO)(S)(K)(V)
+  module RO = Read_only_ext(IO)(S)(K)(V)
   module W = Irmin.Private.Watch.Make(K)(V)
 
-  type t = { t: RO.t; w: W.t }
+  type t = { t: unit RO.t; w: W.t }
   type key = RO.key
   type value = RO.value
   type watch = W.watch * (unit -> unit Lwt.t)
 
   let temp_dir t = t.t.RO.path / "tmp"
 
-  (* FIXME: do we really want a global state here?
-     maybe we should use a weak map? *)
-  let watches = Hashtbl.create 10
+  module E = Ephemeron.K1.Make (struct
+    type t = string
+    let equal = fun x y -> compare x y = 0
+    let hash = Hashtbl.hash
+  end)
+
+  let watches = E.create 10
 
   let v config =
     RO.v config >|= fun t ->
     let w =
       let path = RO.get_path config in
-      try Hashtbl.find watches path
+      try E.find watches path
       with Not_found ->
         let w = W.v () in
-        Hashtbl.add watches path w;
+        E.add watches path w;
         w
     in
     { t; w }
@@ -252,9 +245,9 @@ module Make_ext (IO: IO) (Obj: Config) (Ref: Config)
     (B: Irmin.Branch.S)
     (H: Irmin.Hash.S)
 = struct
-  module AO = AO_ext(IO)(Obj)
-  module RW = RW_ext(IO)(Ref)
-  include Irmin.Make(AO)(RW)(M)(C)(P)(B)(H)
+  module AO = Append_only_ext(IO)(Obj)
+  module AW = Atomic_write_ext(IO)(Ref)
+  include Irmin.Make(Irmin.Content_addressable(AO))(AW)(M)(C)(P)(B)(H)
 end
 
 let string_chop_prefix ~prefix str =
@@ -300,26 +293,8 @@ module Obj = struct
 
 end
 
-module Links = struct
-
-  let dir t = t / "links"
-
-  let file_of_key k =
-    let pre = String.with_range k ~len:2 in
-    let suf = String.with_range k ~first:2 in
-    "links" / pre / suf
-
-  let key_of_file path =
-    let path = string_chop_prefix ~prefix:("links" / "") path in
-    let path = String.cuts ~sep:Filename.dir_sep path in
-    let path = String.concat ~sep:"" path in
-    path
-
-end
-
-module AO (IO: IO) = AO_ext (IO)(Obj)
-module Link (IO: IO) = Link_ext (IO)(Links)
-module RW (IO: IO) = RW_ext (IO)(Ref)
+module Append_only (IO: IO) = Append_only_ext (IO)(Obj)
+module Atomic_write (IO: IO) = Atomic_write_ext (IO)(Ref)
 module Make (IO: IO) = Make_ext (IO)(Obj)(Ref)
 
 module KV (IO: IO) (C: Irmin.Contents.S) =

@@ -78,22 +78,8 @@ val config:
     the smaller [size] is, the bigger the risk of hash collisions, so
     use reasonable values. *)
 
-module AO (S: Irmin.AO_MAKER): Irmin.AO_MAKER
-(** [AO(X)] is an append-only store which store values cut into chunks
-    into the underlying store [X].
-
-    The keys returns by [add] are the hash of the chunked values: it could
-    either be a full block if the value is small, or a tree node if
-    the values need to be cut into chunks.
-
-    In both case, the return hash will be different from the hash of
-    the value. This discrepency can be fixed using
-    {{!AO_stable}AO_stable}, at the cost of adding an indirection on
-    reads. *)
-
-module AO_stable (L: Irmin.LINK_MAKER) (S: Irmin.AO_MAKER):
-  Irmin.AO_MAKER
-(** [AO_stable(L)(X)] is similar to [AO(X)] but is ensures that the
-    return keys are similar as if they were stored directly in [X], so
-    that the fact that blobs are cut into chunks is an implementation
-    detail. *)
+module Content_addressable
+    (S: Irmin.APPEND_ONLY_STORE_MAKER)
+  : Irmin.CONTENT_ADDRESSABLE_STORE_MAKER
+(** [Content_addressable(X)] is a content-addressable store which store values
+    cut into chunks into the underlying store [X]. *)
