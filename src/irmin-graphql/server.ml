@@ -575,7 +575,7 @@ module Make(Server: Cohttp_lwt.S.Server)(Config: CONFIG)(Store : Irmin.S) = stru
           )
       ;
       io_field "merge"
-        ~typ:(Lazy.force commit)
+        ~typ:(string)
         ~args:Arg.[
             arg "branch" ~typ:Input.branch;
             arg "key" ~typ:(non_null Input.key);
@@ -587,8 +587,9 @@ module Make(Server: Cohttp_lwt.S.Server)(Config: CONFIG)(Store : Irmin.S) = stru
             mk_branch (Store.repo s) branch >>= fun t ->
             txn t info >>= fun (info, retries, allow_empty, parents) ->
             Store.merge_exn t key ~info ?retries ?allow_empty ?parents ~old value >>= fun _ ->
-            Store.Head.find t >>=
-            Lwt.return_ok
+            Store.hash t key >>= (function
+            | Some hash -> Lwt.return_some (Irmin.Type.to_string Store.Hash.t hash)
+            | None -> Lwt.return_none) >>= Lwt.return_ok
           )
       ;
       io_field "merge_tree"

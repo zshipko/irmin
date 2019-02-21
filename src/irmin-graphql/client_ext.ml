@@ -292,9 +292,9 @@ module Helper(Client: Cohttp_lwt.S.Client)(Hash: Irmin.Hash.S) = struct
        | _ -> Ok j)
     | Error msg -> error_msg msg
 
-  let decode_hash key = function
+  let decode_hash ?(suffix = ["hash"]) key = function
     | Ok j ->
-      (match Json.find j ("data" :: key @ ["hash"]) with
+      (match Json.find j ("data" :: key @ suffix) with
        | Some (`String hash) -> Irmin.Type.of_string Hash.t hash
        | _ -> invalid_response)
     | Error msg -> error_msg msg
@@ -574,7 +574,7 @@ struct
       ; "value", value
       ; "info", mk_info ?author ?message ?retries ?allow_empty ?parents () ]
     in
-    execute_json client ~vars Query.merge_with_branch >|= decode_hash ["merge"]
+    execute_json client ~vars Query.merge >|= decode_hash ~suffix:[] ["merge"]
 
   let merge_tree client ?retries ?allow_empty ?parents ?author ?message key ~old value =
     let branch = opt_branch client.branch in

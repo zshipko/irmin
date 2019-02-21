@@ -60,9 +60,7 @@ let remove = {|
 
 let merge = {|
   mutation Merge($branch: BranchName, $key: Key!, $value: Value, $old: Value, $info: InfoInput) {
-      merge(branch: $branch, info: $info, key: $key, value: $value, old: $old) {
-          hash
-      }
+      merge(branch: $branch, info: $info, key: $key, value: $value, old: $old)
   }
 |}
 
