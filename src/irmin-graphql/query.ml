@@ -50,6 +50,32 @@ let set_tree = {|
   }
 |}
 
+let add_commit = {|
+  mutation AddCommit($node: String!, $info: InfoInput) {
+    add_commit(node: $node, info: $info) {
+      hash
+    }
+  }
+|}
+
+let add_node = {|
+  mutation AddNode($node: String!) {
+    add_node(node: $node)
+  }
+|}
+
+let add_object = {|
+  mutation AddObject($object: String!) {
+    add_object(object: $object)
+  }
+|}
+
+let find_node = {|
+  query FindNode($hash: String!) {
+    find_node(hash: $hash)
+  }
+|}
+
 let remove = {|
   mutation Remove($branch: BranchName!, $key: Key!, $info: InfoInput) {
     remove(branch: $branch, key: $key, info: $info) {
@@ -137,7 +163,7 @@ let lca = {|
 |}
 
 let branch_info = {|
-  query BranchInfo($branch: BranchName!) {
+  query BranchInfo($branch: BranchName) {
       branch(name: $branch) {
         name,
         head {
@@ -241,6 +267,9 @@ let all = [
   "set", set;
   "update_tree", update_tree;
   "set_tree", set_tree;
+  "add_commit", add_commit;
+  "add_node", add_node;
+  "add_object", add_object;
   "remove", remove;
   "merge", merge;
   "merge_tree", merge_tree;
@@ -261,6 +290,7 @@ let all = [
   "remove_branch", remove_branch;
   "find_object", find_object;
   "find_tree", find_tree;
+  "find_node", find_node;
 ]
 
 let generate_json () =

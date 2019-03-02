@@ -2,11 +2,6 @@ open Lwt.Infix
 
 include Client_ext
 
-exception Unimplemented of string
-let unimplemented name =
-  Printexc.record_backtrace true;
-  raise (Unimplemented name)
-
 module Make
     (Client : Cohttp_lwt.S.Client)
     (M: Irmin.Metadata.S)
@@ -31,8 +26,35 @@ struct
       type key = Key.t
       type value = Val.t
 
-      let merge = unimplemented "Store.Contents.merge"
-      let add = unimplemented "Store.Contents.add"
+      let add t x =
+        Graphql.Private.add_object t (Irmin.Type.to_string C.t x) >|= Graphql.unwrap
+
+      let merge: [`Read | `Write] t -> key option Irmin.Merge.t = fun t ->
+        let f = Irmin.Merge.f C.merge in
+        Irmin.(Merge.v (Type.option Key.t) (fun ~old a b ->
+          let _ = old in
+          (match a with
+          | Some a ->
+              Graphql.find_object t a >|= fun a ->
+              Graphql.unwrap a
+          | None -> Lwt.return_none) >>= fun a ->
+          (match b with
+          | Some b ->
+              Graphql.find_object t b >|= fun b ->
+              Graphql.unwrap b
+          | None -> Lwt.return_none) >>= fun b ->
+          old () >>= (function
+            | Ok (Some (Some old)) ->
+                Graphql.find_object t old >|= fun old ->
+                Merge.promise (Graphql.unwrap old)
+            | Ok None | Ok (Some None) ->
+                Lwt.return (Merge.promise None)
+            | Error e -> Lwt.return (fun () -> Lwt.return_error e)) >>= fun old ->
+          f ~old a b >>= function
+          | Ok (Some x) -> add t x >|= fun x -> Ok (Some x)
+          | Ok None -> Lwt.return_ok None
+          | Error e -> Lwt.return_error e
+        ))
 
       let find t k =
         Graphql.find_object t k >|= function
@@ -51,11 +73,22 @@ struct
       type 'a t = Graphql.t
       type key = Key.t
       type value = Val.t
-      let add = unimplemented "Store.Node.add"
-      let mem = unimplemented "Store.Node.mem"
-      let find = unimplemented "Store.Node.find"
-    end)
 
+      let add t v =
+        let v = Irmin.Type.to_string Val.t v in
+        Graphql.Private.add_node t v >|= Graphql.unwrap
+
+
+      let find t hash =
+        (Graphql.Private.find_node t hash >|= Graphql.unwrap) >|= function
+        | Some x -> Some (Irmin.Type.of_string Val.t x |> Graphql.unwrap)
+        | None -> None
+
+      let mem t hash =
+        find t hash >|= function
+        | Some _ -> true
+        | None -> false
+    end)
 
     module Commit = Irmin.Private.Commit.Store(Node)(struct
       module Key = Hash
@@ -70,7 +103,10 @@ struct
         let parents = List.map (fun x -> x.Graphql.hash) c.Graphql.parents in
         Val.v ~info ~node ~parents
 
-      let add = unimplemented "Store.Commit.add"
+      let add t commit =
+        let parents = Val.parents commit in
+        let node = Val.node commit in
+        Graphql.Private.add_commit t ~parents node >|= Graphql.unwrap
 
       let find t hash =
         Graphql.commit_info t hash >|= function
@@ -99,10 +135,15 @@ struct
         let ctx = None in
         let branch = None in
         let client = Graphql.v ?headers ?ctx ?branch uri in
-        Lwt.return client
+        Graphql.verify client >|= fun ok ->
+        if not ok then
+          failwith "Unable to verify client"
+        else client
 
-
-      let batch = unimplemented "Repo.batch"
+      let batch t f =
+        let node = t, t in
+        let commit = node, t in
+        f t node commit
     end
 
     module Branch = struct
@@ -139,17 +180,31 @@ struct
         let _ = Graphql.unwrap x in
         Lwt.return_unit
 
-      let test_and_set = unimplemented "Store.Branch.test_and_set"
+      let test_and_set t branch ~test ~set =
+        let _ = test in
+        match set with
+        | Some set ->
+          Graphql.set_branch t branch set >|= Graphql.unwrap
+        | None ->
+          Graphql.remove_branch t branch >|= Graphql.unwrap
 
-      let watch = unimplemented "Store.Branch.watch"
-      let watch_key = unimplemented "Store.Branch.watch_key"
-      let unwatch = unimplemented "Store.Branch.unwatch"
+      let watch t ?init x =
+        let _ = t, init, x in
+        Lwt.return_unit
+
+      let watch_key t key ?init x =
+        let _ = t, key, init,x in
+        Lwt.return_unit
+
+      let unwatch t x =
+        let _ = t, x in
+        Lwt.return_unit
     end
   end
 
   include Irmin.Of_private (X)
 
-  let parent_hashes = function None -> None | Some l -> Some (List.map Commit.hash l)
+  (*let parent_hashes = function None -> None | Some l -> Some (List.map Commit.hash l)
   let split_info info =
     let i = info ()  in
     Irmin.Info.author i, Irmin.Info.message i
@@ -215,6 +270,22 @@ struct
     | Ok () -> ()
     | Error _ -> invalid_arg "test_and_set_exn"
 
+  let set_tree ?retries ?allow_empty ?parents ~info t key tree =
+    let parents = parent_hashes parents  in
+    let author, message = split_info info in
+    Tree.to_concrete tree >>= fun tree->
+    Graphql.set_tree (repo t) ?retries ?allow_empty ?parents ~author ~message key tree >|= function
+    | Ok _ -> Ok ()
+    | Error _ as e -> Graphql.unwrap e
+
+  let set_tree_exn ?retries ?allow_empty ?parents ~info t key tree =
+    set_tree ?retries ?allow_empty ?parents ~info t key tree >|= function
+    | Ok () -> ()
+    | Error _ -> invalid_arg "set_tree"
+
+  (*let with_tree = unimplemented "with_tree"
+  let with_tree_exn = unimplemented "with_tree_exn"*)
+
   let tree t =
     Graphql.get_tree (repo t) K.empty >|= function
     | Ok x -> Tree.of_concrete x
@@ -229,6 +300,19 @@ struct
     Graphql.get_tree (repo t) key >|= function
     | Ok x -> (Tree.of_concrete x)
     | Error _ as e -> Graphql.unwrap e
+
+  let merge ?retries ?allow_empty ?parents ~info ~old t key v =
+    let parents = parent_hashes parents  in
+    let author, message = split_info info in
+    Graphql.merge (repo t) ?retries ?allow_empty ?parents ~author ~message ~old key v >|= function
+    | Ok _ -> Ok ()
+    | Error _ as e -> Graphql.unwrap e
+
+  let merge_exn ?retries ?allow_empty ?parents ~info ~old t key v =
+    merge ?retries ?allow_empty ?parents ~info ~old t key v >|= function
+    | Ok () -> ()
+    | Error _ -> invalid_arg "merge_exn"*)
+
 end
 
 module KV (Client: Cohttp_lwt.S.Client)(Contents: Irmin.Contents.S) =

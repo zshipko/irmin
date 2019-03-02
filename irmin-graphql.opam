@@ -17,6 +17,7 @@ depends: [
   "ocaml"   {>= "4.03.0"}
   "dune"    {build}
   "irmin"
+  "irmin-mem"
   "graphql" {>= "0.8"}
   "graphql-lwt" {>= "0.8"}
   "graphql-cohttp" {>= "0.8"}

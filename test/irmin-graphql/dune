@@ -5,7 +5,7 @@
 
 (executable
  (name      test)
- (modules   test)
+ (modules   test test_graphql_ext)
  (libraries checkseum.c digestif.c test_graphql))
 
 (alias

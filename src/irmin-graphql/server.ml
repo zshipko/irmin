@@ -228,26 +228,14 @@ module Make(Server: Cohttp_lwt.S.Server)(Config: CONFIG)(Store : Irmin.S) = stru
                     | Error msg -> Lwt.return_error msg
                   )
               ;
-              io_field "value"
+              io_field "contents"
                 ~args:[]
-                ~typ:string
-                ~resolve:(fun _ (tree, key) ->
-                    Store.Tree.find tree key >>= function
-                    | Some contents ->
-                      let s = Irmin.Type.to_string Store.contents_t contents in
-                      Lwt.return_ok (Some s)
-                    | _ -> Lwt.return_ok None
-                  );
-              io_field "metadata"
-                ~args:[]
-                ~typ:string
-                ~resolve:(fun _ (tree, key) ->
-                    Store.Tree.find_all tree key >>= function
-                    | Some (_contents, metadata) ->
-                      let s = Irmin.Type.to_string Store.metadata_t metadata in
-                      Lwt.return_ok (Some s)
-                    | None -> Lwt.return_ok None
-                  );
+                ~typ:(Lazy.force contents)
+                ~resolve:( fun _ (tree, key) ->
+                    Store.Tree.mem tree key >>= fun x ->
+                    if x then Lwt.return_ok (Some (tree, key))
+                    else Lwt.return_ok None
+                );
               io_field "tree"
                 ~typ:(non_null (list (non_null tree)))
                 ~args:[]
@@ -369,6 +357,16 @@ module Make(Server: Cohttp_lwt.S.Server)(Config: CONFIG)(Store : Irmin.S) = stru
                       Ok (Some (Irmin.Type.to_string Store.contents_t contents))
                   )
               ;
+              io_field "hash"
+                ~typ:string
+                ~args:[]
+                ~resolve:(fun _ (tree, key) ->
+                    Store.Tree.find tree key >|= function
+                    | None -> Ok None
+                    | Some contents ->
+                      let contents = Store.Contents.hash contents in
+                      Ok (Some (Irmin.Type.to_string Store.Hash.t contents))
+                );
             ])
     )
 
@@ -695,6 +693,47 @@ module Make(Server: Cohttp_lwt.S.Server)(Config: CONFIG)(Store : Irmin.S) = stru
               Store.Branch.remove (Store.repo s) branch >>= fun () ->  Lwt.return_ok true
             else Lwt.return_ok false
           );
+      io_field "add_commit"
+        ~typ:(Lazy.force commit)
+        ~args:Arg.[
+          arg "node" ~typ:(non_null Input.object_hash);
+          arg "info" ~typ:Input.info;
+        ]
+        ~resolve:(fun _ _ node info ->
+          txn s info >>= fun (info, _, _, parents) ->
+          let parents = match parents with None -> [] | Some x -> x in
+          Store.Tree.of_hash (Store.repo s) node >>= fun tree ->
+          match tree with
+          | Some (`Node tree) ->
+            Store.Commit.v (Store.repo s) ~info:(info ()) ~parents (`Node tree) >>= Lwt.return_some >>= Lwt.return_ok
+          | None -> Lwt.return_none >>= Lwt.return_ok
+        );
+      io_field "add_node"
+        ~typ:string
+        ~args:Arg.[
+          arg "node" ~typ:(non_null string);
+        ]
+        ~resolve:(fun _ _ node ->
+          match Irmin.Type.of_string Store.Private.Node.Val.t node with
+          | Ok node ->
+            Store.Private.Repo.batch (Store.repo s) (fun _ nodes _ ->
+              Store.Private.Node.add nodes node >>= fun hash ->
+              Lwt.return_ok (Some (Irmin.Type.to_string Store.Hash.t hash)))
+          | Error (`Msg e) -> Lwt.return_error e
+        );
+      io_field "add_object"
+        ~typ:string
+        ~args:Arg.[
+          arg "object" ~typ:(non_null string);
+        ]
+        ~resolve:(fun _ _ o ->
+          match Irmin.Type.of_string Store.contents_t o with
+          | Ok o ->
+            Store.Private.Repo.batch (Store.repo s) (fun contents _ _ ->
+              Store.Private.Contents.add contents o >>= fun hash ->
+              Lwt.return_ok (Some (Irmin.Type.to_string Store.Hash.t hash)))
+          | Error (`Msg e) -> Lwt.return_error e
+        );
     ]
 
   let diff = Schema.(obj "Diff"
@@ -753,6 +792,16 @@ module Make(Server: Cohttp_lwt.S.Server)(Config: CONFIG)(Store : Irmin.S) = stru
     let mutations = mutations s @ remote s in
     let subscriptions = subscriptions s in
     Schema.(schema ~mutations ~subscriptions [
+        io_field "verify"
+          ~typ:(non_null bool)
+          ~args:Arg.[
+            arg "hash" ~typ:(non_null string)
+          ]
+          ~resolve:(fun _ _ hash ->
+              let h = Store.Hash.digest "irmin" in
+              let s = Irmin.Type.to_string Store.Hash.t h in
+              Lwt.return_ok (s = hash)
+            );
         io_field "commit"
           ~typ:(Lazy.force commit)
           ~args:Arg.[
@@ -779,31 +828,41 @@ module Make(Server: Cohttp_lwt.S.Server)(Config: CONFIG)(Store : Irmin.S) = stru
             );
         io_field "branch"
           ~typ:(Lazy.force (branch))
-          ~args:Arg.[arg "name" ~typ:(non_null Input.branch)]
+          ~args:Arg.[arg "name" ~typ:(Input.branch)]
           ~resolve:(fun _ _ branch ->
-              Store.of_branch (Store.repo s) branch >>= fun t ->
-              Lwt.return_ok (Some (t, branch))
+              match branch with
+              | Some branch ->
+                Lwt.return_ok (Some (s, branch))
+              | None -> Lwt.return_ok (Some (s, Store.Branch.master))
             );
         io_field "find_object"
           ~typ:(string)
           ~args:Arg.[arg "hash" ~typ:(non_null Input.object_hash)]
           ~resolve:(fun _ _ hash ->
               (Store.Contents.of_hash (Store.repo s) hash >>= function
-              | Some x -> Lwt.return_some (Irmin.Type.to_string Store.contents_t x)
-              | None -> Lwt.return_none) >>= Lwt.return_ok
+              | Some x -> Lwt.return_some (Irmin.Type.to_string Store.contents_t x) >>= Lwt.return_ok
+              | None -> Lwt.return_ok None)
           );
-          io_field "find_tree"
-            ~args:Arg.[arg "hash" ~typ:(non_null Input.object_hash)]
-            ~typ:(list (non_null @@ Lazy.force contents))
-            ~resolve:(fun _ _ hash ->
-                Store.Tree.of_hash (Store.repo s) hash >>= function
-                | None -> Lwt.return_ok None
-                | Some (`Node n) ->
-                    Store.Tree.of_node n |> Store.Tree.to_concrete >>= fun t ->
-                    let l = tree_list t t Store.Key.empty [] in
-                    Lwt.return_ok (Some l)
-              )
-          ;
+        io_field "find_tree"
+          ~args:Arg.[arg "hash" ~typ:(non_null Input.object_hash)]
+          ~typ:(list (non_null @@ Lazy.force contents))
+          ~resolve:(fun _ _ hash ->
+              Store.Tree.of_hash (Store.repo s) hash >>= function
+              | None -> Lwt.return_ok None
+              | Some (`Node n) ->
+                  Store.Tree.of_node n |> Store.Tree.to_concrete >>= fun t ->
+                  let l = tree_list t t Store.Key.empty [] in
+                  Lwt.return_ok (Some l)
+            );
+        io_field "find_node"
+          ~typ:(string)
+          ~args:Arg.[arg "hash" ~typ:(non_null Input.object_hash)]
+          ~resolve:(fun _ _ hash ->
+              Store.Private.Repo.batch (Store.repo s) (fun _ nodes _ ->
+                Store.Private.Node.find nodes hash >>= function
+                | Some x -> Lwt.return_ok (Some (Irmin.Type.to_string Store.Private.Node.Val.t x))
+                | None -> Lwt.return_ok None)
+          );
       ])
 
   let execute_request ctx req = Graphql_server.execute_request ctx () req

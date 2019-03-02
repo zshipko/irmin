@@ -15,4 +15,5 @@
  *)
 
 let () =
-  Test_graphql.run ()
+  Test_graphql.run ();;
+  (*Test_graphql_ext.run ()*)

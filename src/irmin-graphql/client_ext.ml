@@ -54,6 +54,7 @@ module type EXT = sig
   val v: ?headers:Cohttp.Header.t -> ?ctx:Client.ctx -> ?branch:string -> Uri.t -> t
   val with_branch: t -> string option -> t
 
+  val verify : t -> bool Lwt.t
 
   val execute :
     t
@@ -224,6 +225,32 @@ module type EXT = sig
 
   val remove_branch:
     t -> Branch.t -> (bool, error) result Lwt.t
+
+  module Private: sig
+
+    val add_commit :
+      t
+      -> ?parents:Hash.t list
+      -> ?author:string
+      -> ?message:string
+      -> Hash.t
+      -> (Hash.t, error) result Lwt.t
+
+    val add_node :
+      t
+      -> string
+      -> (Hash.t, error) result Lwt.t
+
+    val add_object :
+      t
+      -> string
+      -> (Hash.t, error) result Lwt.t
+
+    val find_node :
+      t
+      -> Hash.t
+      -> (string option, error) result Lwt.t
+  end
 end
 
 let opt f = function
@@ -248,6 +275,11 @@ module Helper(Client: Cohttp_lwt.S.Client)(Hash: Irmin.Hash.S) = struct
     | Ok x -> x
     | Error (`Msg msg) -> raise (Graphql msg)
 
+  let unwrap_option name = function
+    | Ok (Some x) -> Ok x
+    | Ok None -> Error (`Msg ("unwrap_option: " ^ name))
+    | Error e -> Error e
+
   let opt_branch x =
     let b = match x with
       | Some b -> b
@@ -256,7 +288,7 @@ module Helper(Client: Cohttp_lwt.S.Client)(Hash: Irmin.Hash.S) = struct
 
   let error msg = Error (`Msg msg)
   let error_msg msg = Error msg
-  let invalid_response = error "invalid response"
+  let invalid_response name = print_endline ("INVALID RESPONSE: " ^ name); error ("invalid response: " ^ name)
 
   let v ?headers ?ctx ?branch uri = {uri; headers; ctx; branch}
   let with_branch t branch = {t with branch = branch}
@@ -283,6 +315,7 @@ module Helper(Client: Cohttp_lwt.S.Client)(Hash: Irmin.Hash.S) = struct
 
   let execute_json client ?vars ?operation body =
     execute client ?vars ?operation body >|= fun res ->
+    Printf.printf "RESPONSE: %s\n" res;
     match Json.of_string res with
     | Ok j ->
       (match Json.find j ["errors"] with
@@ -292,12 +325,16 @@ module Helper(Client: Cohttp_lwt.S.Client)(Hash: Irmin.Hash.S) = struct
        | _ -> Ok j)
     | Error msg -> error_msg msg
 
-  let decode_hash ?(suffix = ["hash"]) key = function
+  let decode_hash name ?(suffix = ["hash"]) key = function
+    | Ok `Null -> Lwt.return_ok None
     | Ok j ->
       (match Json.find j ("data" :: key @ suffix) with
-       | Some (`String hash) -> Irmin.Type.of_string Hash.t hash
-       | _ -> invalid_response)
-    | Error msg -> error_msg msg
+       | Some (`String hash) ->
+           (match Irmin.Type.of_string Hash.t hash with
+           | Ok x -> Lwt.return_ok (Some x)
+           | Error e -> Lwt.return_error e)
+       | _ -> Lwt.return @@ invalid_response name)
+    | Error msg -> Lwt.return @@ error_msg msg
 
 end
 
@@ -374,6 +411,16 @@ struct
       |> sealr
     )
 
+  let verify client =
+    let hash = Hash.digest "irmin" |> Irmin.Type.to_string Hash.t in
+    let vars = ["hash", `String hash] in
+    execute_json ~vars client "query Verify($hash: String!){ verify(hash: $hash) }" >|= function
+    | Ok j ->
+        (match Json.find j ["data"; "verify"] with
+        | Some (`Bool true) -> true
+        | _ -> false)
+    | _ -> false
+
   let list client path =
     let branch = opt_branch client.branch in
     let key = Irmin.Type.to_string Path.t path in
@@ -391,7 +438,7 @@ struct
                    | Ok x -> x)
                 | _ -> failwith "invalid key value") keys)
           with Failure msg -> Error (`Msg msg))
-       | _ -> invalid_response)
+       | _ -> invalid_response "list")
     | Error msg -> error_msg msg
 
   let find client key =
@@ -406,7 +453,7 @@ struct
           | Ok x -> Ok (Some x)
           | Error e -> Error e)
        | Some `Null -> Ok None
-       | _ -> invalid_response)
+       | _ -> invalid_response "find")
     | Error msg -> error_msg msg
 
   let find_object client hash =
@@ -420,7 +467,7 @@ struct
           | Ok x -> Ok (Some x)
           | Error e -> Error e)
        | Some `Null -> Ok None
-       | _ -> invalid_response)
+       | _ -> invalid_response "find_object")
     | Error msg -> error_msg msg
 
   let get client key =
@@ -472,7 +519,7 @@ struct
     | Ok j ->
     (match Json.find j ["data"; "branch"; "get_tree"] with
      | Some (`A arr) -> make_tree arr >>= Lwt.return_ok
-     | _ -> Lwt.return invalid_response)
+     | _ -> Lwt.return (invalid_response "get_tree"))
     | Error msg -> Lwt.return (error_msg msg)
 
   let set client ?retries ?allow_empty ?parents ?author ?message  key value =
@@ -486,7 +533,7 @@ struct
       ; ("info", mk_info ?author ?message ?retries ?allow_empty ?parents ()) ]
     in
     execute_json client ~vars Query.set
-    >|= decode_hash ["set"]
+    >>= decode_hash "set" ["set"] >|= unwrap_option "set"
 
   let test_and_set client ?retries ?allow_empty ?parents ?author ?message  key ~test ~set =
     let branch = opt_branch client.branch in
@@ -501,7 +548,7 @@ struct
       ; ("info", mk_info ?author ?message ?retries ?allow_empty ?parents ()) ]
     in
     execute_json client ~vars Query.test_and_set
-    >|= decode_hash ["test_and_set"]
+    >>= decode_hash "test_and_set" ["test_and_set"] >|= unwrap_option "test_and_set"
 
   let set_all client ?retries ?allow_empty ?parents ?author ?message  key value metadata =
     let branch = opt_branch client.branch in
@@ -516,7 +563,7 @@ struct
       ; ("info", mk_info ?author ?message ?retries ?allow_empty ?parents ()) ]
     in
     execute_json client ~vars Query.set_all
-    >|= decode_hash ["set_all"]
+    >>= decode_hash "set_all" ["set_all"] >|= unwrap_option "set_all"
 
   let tree_list key x =
     let rec aux key x acc = match x with
@@ -546,11 +593,11 @@ struct
 
   let set_tree client ?retries ?allow_empty ?parents ?author ?message  key tree =
     set_or_update_tree client ?author ?message ?retries ?allow_empty ?parents key tree Query.set_tree
-    >|= decode_hash ["set_tree"]
+    >>= decode_hash "set_tree" ["set_tree"]  >|= unwrap_option "set_tree"
 
   let update_tree client ?retries ?allow_empty ?parents ?author ?message  key tree =
     set_or_update_tree client ?author ?message ?retries ?allow_empty ?parents key tree Query.update_tree
-    >|= decode_hash ["update_tree"]
+    >>= decode_hash "update_tree" ["update_tree"]  >|= unwrap_option "update_tree"
 
   let remove client ?retries ?allow_empty ?parents ?author ?message  key =
     let branch = opt_branch client.branch in
@@ -560,7 +607,7 @@ struct
       ; "branch", branch
       ; "info", mk_info ?author ?message ?retries ?allow_empty ?parents () ]
     in
-    execute_json client ~vars Query.remove >|= decode_hash ["remove"]
+    execute_json client ~vars Query.remove >>= decode_hash "remove" ["remove"] >|= unwrap_option "remove"
 
   let merge client ?retries ?allow_empty ?parents ?author ?message key ~old value =
     let branch = opt_branch client.branch in
@@ -574,7 +621,8 @@ struct
       ; "value", value
       ; "info", mk_info ?author ?message ?retries ?allow_empty ?parents () ]
     in
-    execute_json client ~vars Query.merge >|= decode_hash ~suffix:[] ["merge"]
+    execute_json client ~vars Query.merge >>= decode_hash "merge" ~suffix:[] ["merge"]
+    >|= unwrap_option "merge"
 
   let merge_tree client ?retries ?allow_empty ?parents ?author ?message key ~old value =
     let branch = opt_branch client.branch in
@@ -588,7 +636,8 @@ struct
       ; "value", value
       ; "info", mk_info ?author ?message ?retries ?allow_empty ?parents () ]
     in
-    execute_json client ~vars Query.merge_tree >|= decode_hash ["merge_tree"]
+    execute_json client ~vars Query.merge_tree >>= decode_hash "merge_tree" ["merge_tree"]
+    >|= unwrap_option "merge_tree"
 
   let merge_with_branch client ?depth ?n ?author ?message  from =
     let into = opt_branch client.branch in
@@ -600,7 +649,8 @@ struct
       ; "depth", opt (fun i -> `Float (float_of_int i)) depth
       ; "n", opt (fun i -> `Float (float_of_int i)) n ]
     in
-    execute_json client ~vars Query.merge >|= decode_hash ["merge_with_branch"]
+    execute_json client ~vars Query.merge >>= decode_hash "merge_with_branch" ["merge_with_branch"]
+    >|= unwrap_option "merge_with_branch"
 
   let merge_with_commit client ?depth ?n ?author ?message from =
     let into = opt_branch client.branch in
@@ -612,7 +662,8 @@ struct
       ; "depth", opt (fun i -> `Float (float_of_int i)) depth
       ; "n", opt (fun i -> `Float (float_of_int i)) n ]
     in
-    execute_json client ~vars Query.merge_with_commit >|= decode_hash ["merge_with_commit"]
+    execute_json client ~vars Query.merge_with_commit >>= decode_hash "merge_with_commit" ["merge_with_commit"]
+    >|= unwrap_option "merge_with_commit"
 
   let push client remote =
     let branch = opt_branch client.branch in
@@ -624,7 +675,7 @@ struct
     | Ok j ->
       (match Json.find j ["data"; "push"] with
        | Some (`Bool b) -> Ok b
-       | _ -> invalid_response)
+       | _ -> invalid_response "push")
     | Error msg -> error_msg msg
 
   let pull client ?depth ?author ?message remote =
@@ -635,7 +686,7 @@ struct
       ; "remote", `String remote
       ; "depth", opt (fun x -> `Float (float_of_int x)) depth]
     in
-    execute_json client ~vars Query.pull >|= decode_hash ["pull"]
+    execute_json client ~vars Query.pull >>= decode_hash "pull" ["pull"] >|= unwrap_option "pull"
 
   let clone client remote =
     let branch = opt_branch client.branch in
@@ -643,7 +694,7 @@ struct
       [ "branch", branch
       ; "remote", `String remote ]
     in
-    execute_json client ~vars Query.clone >|= decode_hash ["clone"]
+    execute_json client ~vars Query.clone >>= decode_hash "clone" ["clone"] >|= unwrap_option "clone"
 
   let revert client commit =
     let branch = opt_branch client.branch in
@@ -652,11 +703,12 @@ struct
       [ "branch", branch
       ; "commit", `String commit' ]
     in
-    execute_json client ~vars Query.revert >|= fun x ->
-    (match decode_hash ["revert"] x with
-     | Ok hash ->
-       Ok (Irmin.Type.equal Hash.t commit hash)
-     | Error msg -> error_msg msg)
+    execute_json client ~vars Query.revert >>= fun x ->
+    (decode_hash "revert" ["revert"] x >>= function
+     | Ok (Some hash) ->
+       Lwt.return_ok (Irmin.Type.equal Hash.t commit hash)
+     | Ok None -> invalid_arg "revert"
+     | Error msg -> Lwt.return @@ error_msg msg)
 
   let rec make_commit_info commit =
     let hash =
@@ -685,9 +737,10 @@ struct
       | _ -> failwith "Invalid parents field"
     in
     let tree =
-      match Json.find_exn commit ["tree"] with
-      | `A arr -> make_tree arr
-      | _ -> failwith "Invalid commit field"
+      match Json.find commit ["tree"] with
+      | Some (`A arr) -> make_tree arr
+      | Some _ -> failwith "Invalid commit field"
+      | None -> make_tree []
     in
     let info = Irmin.Info.v ~date ~author message in
     parents >>= fun parents ->
@@ -707,7 +760,7 @@ struct
             make_commit_info (Json.find_exn obj ["head"]) >>= Lwt.return_some)
           (fun _ -> Lwt.return_none) >|= fun commit -> name, commit
         ) branches >>= Lwt.return_ok
-       | _ -> Lwt.return invalid_response)
+       | _ -> Lwt.return (invalid_response "branches"))
     | Error msg -> Lwt.return @@ error_msg msg
 
   let lca client commit =
@@ -725,12 +778,17 @@ struct
             Lwt_list.map_p make_commit_info commits >>= Lwt.return_ok)
           (function
             | Failure msg -> Lwt.return @@ error msg
+            | Invalid_argument name -> Lwt.return @@ (Error (`Msg ("invalid_argument: " ^ name)))
             | exn -> raise exn)
-       | _ -> Lwt.return invalid_response)
+       | _ -> Lwt.return (invalid_response "lca"))
     | Error msg -> Lwt.return @@ error_msg msg
 
   let branch_info client branch =
-    let branch = opt_branch (Some (Irmin.Type.to_string Branch.t branch)) in
+    let branch =
+      if Irmin.Type.equal Branch.t branch Branch.master
+      then `Null
+      else `String (Irmin.Type.to_string Branch.t branch)
+    in
     let vars =
       [ "branch", branch ]
     in
@@ -739,11 +797,12 @@ struct
       (match Json.find j ["data"; "branch"; "head"] with
        | Some commit ->
          Lwt.catch (fun () ->
-           make_commit_info commit >>= Lwt.return_ok)
+          make_commit_info commit >>= Lwt.return_ok)
           (function
             | Failure msg -> Lwt.return @@ error msg
+            | Invalid_argument name -> Lwt.return @@ (Error (`Msg ("invalid_argument: " ^ name)))
             | exn -> raise exn)
-       | None -> Lwt.return invalid_response)
+       | None -> Lwt.return (invalid_response "branch_info"))
     | Error msg ->Lwt.return @@ error_msg msg
 
 
@@ -760,8 +819,9 @@ struct
            make_commit_info commit >>= Lwt.return_ok)
           (function
             | Failure msg -> Lwt.return @@ error msg
+            | Invalid_argument name -> Lwt.return @@ (Error (`Msg ("invalid_argument: " ^ name)))
             | exn -> raise exn)
-       | None -> Lwt.return invalid_response)
+       | None -> Lwt.return (invalid_response "commit_info"))
     | Error msg -> Lwt.return @@ error_msg msg
 
   let set_branch client branch hash =
@@ -774,7 +834,7 @@ struct
     | Ok j ->
       (match Json.find j ["data"; "set_branch"] with
        | Some s -> Ok (Json.to_string s = "true")
-       | None -> invalid_response)
+       | None -> (invalid_response "set_branch"))
     | Error msg -> error_msg msg
 
   let remove_branch client branch  =
@@ -786,6 +846,52 @@ struct
     | Ok j ->
       (match Json.find j ["data"; "remove_branch"] with
        | Some s -> Ok (Json.to_string s = "true")
-       | None -> invalid_response)
+       | None -> (invalid_response "remove_branch"))
     | Error msg -> error_msg msg
+
+  module Private = struct
+    let add_commit client ?parents ?author ?message node =
+      let vars =
+        [ "info", mk_info ?author ?message ?parents ()
+        ; "node", `String (Irmin.Type.to_string Hash.t node) ]
+      in
+      execute_json client ~vars Query.add_commit
+      >>= decode_hash "add_commit" ["add_commit"] >|= unwrap_option "add_commit"
+
+    let add_node client node =
+      let vars =
+        [ "node", `String node]
+      in
+      execute_json client ~vars Query.add_node >|= function
+      | Ok j ->
+        (match Json.find j ["data"; "add_node"] with
+         | Some (`String s) -> Irmin.Type.of_string Hash.t s
+         | _ -> (invalid_response "add_node"))
+      | Error msg -> error_msg msg
+
+    let add_object client o =
+      let vars =
+        [ "object", `String o]
+      in
+      execute_json client ~vars Query.add_object >|= function
+      | Ok j ->
+        (match Json.find j ["data"; "add_object"] with
+         | Some (`String s) -> Irmin.Type.of_string Hash.t s
+         | _ -> (invalid_response "add_object"))
+      | Error msg -> error_msg msg
+
+    let find_node client hash =
+      let vars =
+        ["hash", `String (Irmin.Type.to_string Hash.t hash)]
+      in
+      execute_json client ~vars Query.find_node >|= function
+      | Ok j ->
+        (match Json.find j ["data"; "find_node"] with
+         | Some (`String s) -> Ok (Some s)
+         | Some `Null -> Ok None
+         | _ -> (invalid_response "find_node"))
+      | Error msg -> error_msg msg
+
+
+  end
 end

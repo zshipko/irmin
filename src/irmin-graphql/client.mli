@@ -53,6 +53,9 @@ module type EXT = sig
   (** Creates a client with the same connection information on a new branch *)
   val with_branch: t -> string option ->  t
 
+
+  val verify: t -> bool Lwt.t
+
   (** {execute client ~vars ~operation query} sends a request to the specified GraphQL server
       and returns the results as a string *)
   val execute :
@@ -249,6 +252,31 @@ module type EXT = sig
   val remove_branch:
     t -> Branch.t -> (bool, error) result Lwt.t
 
+  module Private: sig
+
+    val add_commit :
+      t
+      -> ?parents:Hash.t list
+      -> ?author:string
+      -> ?message:string
+      -> Hash.t
+      -> (Hash.t, error) result Lwt.t
+
+    val add_node :
+      t
+      -> string
+      -> (Hash.t, error) result Lwt.t
+
+    val add_object :
+      t
+      -> string
+      -> (Hash.t, error) result Lwt.t
+
+    val find_node :
+      t
+      -> Hash.t
+      -> (string option, error) result Lwt.t
+  end
 end
 
 module Make_ext
