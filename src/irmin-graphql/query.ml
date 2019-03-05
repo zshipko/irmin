@@ -114,6 +114,12 @@ let merge_with_commit = {|
   }
 |}
 
+let merge_objects = {|
+  mutation MergeObjects($a: ObjectHash, $b: ObjectHash, $old: ObjectHash) {
+    merge_objects(a: $a, b: $b, old: $old)
+  }
+|}
+
 let push = {|
   mutation Push($branch: BranchName, $remote: Remote!) {
     push(branch: $branch, remote: $remote)
@@ -275,6 +281,7 @@ let all = [
   "merge_tree", merge_tree;
   "merge_with_branch", merge_with_branch;
   "merge_with_commit", merge_with_commit;
+  "merge_objects", merge_objects;
   "push", push;
   "pull", pull;
   "clone", clone;

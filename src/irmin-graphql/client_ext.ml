@@ -250,6 +250,13 @@ module type EXT = sig
       t
       -> Hash.t
       -> (string option, error) result Lwt.t
+
+    val merge_objects:
+      t
+      -> old:Hash.t option
+      -> Hash.t option
+      -> Hash.t option
+      -> (Hash.t option, error) result Lwt.t
   end
 end
 
@@ -892,6 +899,26 @@ struct
          | _ -> (invalid_response "find_node"))
       | Error msg -> error_msg msg
 
+    let merge_objects client ~old a b =
+      let opt = function None -> `Null | Some x -> `String (Irmin.Type.to_string Hash.t x) in
+      let old = opt old in
+      let a = opt a in
+      let b = opt b in
+      let vars = [
+        "a", a;
+        "b", b;
+        "old", old;
+      ] in
+      execute_json client ~vars Query.merge_objects >|= function
+      | Ok j ->
+        (match Json.find j ["data"; "merge_objects"] with
+         | Some (`String s) ->
+             (match Irmin.Type.of_string Hash.t s with
+             | Ok x -> Ok (Some x)
+             | Error e -> Error e)
+         | Some `Null -> Ok None
+         | _ -> (invalid_response "merge_objects"))
+      | Error msg -> error_msg msg
 
   end
 end

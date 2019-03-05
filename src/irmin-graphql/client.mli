@@ -276,6 +276,13 @@ module type EXT = sig
       t
       -> Hash.t
       -> (string option, error) result Lwt.t
+
+    val merge_objects:
+      t
+      -> old:Hash.t option
+      -> Hash.t option
+      -> Hash.t option
+      -> (Hash.t option, error) result Lwt.t
   end
 end
 

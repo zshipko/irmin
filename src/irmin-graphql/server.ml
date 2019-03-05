@@ -734,6 +734,24 @@ module Make(Server: Cohttp_lwt.S.Server)(Config: CONFIG)(Store : Irmin.S) = stru
               Lwt.return_ok (Some (Irmin.Type.to_string Store.Hash.t hash)))
           | Error (`Msg e) -> Lwt.return_error e
         );
+      io_field "merge_objects"
+        ~typ:(string)
+        ~args:Arg.[
+            arg "a" ~typ:Input.object_hash;
+            arg "b" ~typ:Input.object_hash;
+            arg "old" ~typ:Input.object_hash;
+          ]
+        ~resolve:(fun _ _src a b old ->
+          Store.Private.Repo.batch (Store.repo s) (fun contents _ _ ->
+              let f = Store.Private.Contents.merge contents |> Irmin.Merge.f in
+              let old = Irmin.Merge.promise old in
+              f a b ~old >|= function
+              | Ok (Some x) -> Ok (Some (Irmin.Type.to_string Store.Hash.t x))
+              | Ok None ->  Ok None
+              | Error e -> Error (Irmin.Type.to_string Irmin.Merge.conflict_t e)
+            )
+          )
+      ;
     ]
 
   let diff = Schema.(obj "Diff"
