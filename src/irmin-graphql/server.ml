@@ -750,8 +750,19 @@ module Make(Server: Cohttp_lwt.S.Server)(Config: CONFIG)(Store : Irmin.S) = stru
               | Ok None ->  Ok None
               | Error e -> Error (Irmin.Type.to_string Irmin.Merge.conflict_t e)
             )
-          )
-      ;
+          );
+      io_field "test_and_set_branch"
+        ~typ:(non_null bool)
+        ~args:Arg.[
+            arg "branch" ~typ:Input.branch;
+            arg "test" ~typ:(Input.commit_hash);
+            arg "set" ~typ:(Input.commit_hash);
+          ]
+        ~resolve:(fun _ _src branch test set  ->
+            let branch = match branch with Some b -> b | None -> Store.Branch.master in
+            let branches = Store.Private.Repo.branch_t (Store.repo s) in
+            Store.Private.Branch.test_and_set branches branch ~test ~set >>= Lwt.return_ok
+          );
     ]
 
   let diff = Schema.(obj "Diff"

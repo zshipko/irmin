@@ -177,13 +177,9 @@ struct
         Lwt.return_unit
 
       let test_and_set t branch ~test ~set =
-        let _ = test in
-        match set with
-        | Some set ->
-          Graphql.set_branch t branch set >|= Graphql.unwrap
-        | None -> Lwt.return_true
-          (*Graphql.remove_branch t branch >|= Graphql.unwrap*)
-
+        let branch = Irmin.Type.to_string B.t branch in
+        let t = Graphql.with_branch t (Some branch) in
+        Graphql.Private.test_and_set_branch t ~test ~set >|= Graphql.unwrap
 
       let watch _t ?init x =
         Watch.watch w ?init x

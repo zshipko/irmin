@@ -257,6 +257,12 @@ module type EXT = sig
       -> Hash.t option
       -> Hash.t option
       -> (Hash.t option, error) result Lwt.t
+
+    val test_and_set_branch:
+      t
+      -> test:Hash.t option
+      -> set:Hash.t option
+      -> (bool, error) result Lwt.t
   end
 end
 
@@ -920,5 +926,20 @@ struct
          | _ -> (invalid_response "merge_objects"))
       | Error msg -> error_msg msg
 
+    let test_and_set_branch client ~test ~set =
+      let opt = function None -> `Null | Some x -> `String (Irmin.Type.to_string Hash.t x) in
+      let branch = opt_branch client.branch in
+      let vars = [
+        "test", opt test;
+        "set", opt set;
+        "branch", branch;
+      ] in
+      execute_json client ~vars Query.test_and_set_branch >|= function
+      | Ok j ->
+          (match Json.find j ["data"; "test_and_set_branch"] with
+          | Some (`Bool true) -> Ok true
+          | Some (`Bool false) -> Ok false
+          | _ -> invalid_response "test_and_set_branch")
+      | Error e -> Error e
   end
 end

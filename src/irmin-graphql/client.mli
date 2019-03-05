@@ -283,6 +283,12 @@ module type EXT = sig
       -> Hash.t option
       -> Hash.t option
       -> (Hash.t option, error) result Lwt.t
+
+    val test_and_set_branch:
+      t
+      -> test:Hash.t option
+      -> set:Hash.t option
+      -> (bool, error) result Lwt.t
   end
 end
 

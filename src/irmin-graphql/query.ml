@@ -34,6 +34,12 @@ let test_and_set = {|
   }
 |}
 
+let test_and_set_branch = {|
+  mutation TestAndSetBranch($branch: BranchName, $test: CommitHash!, $set: CommitHash!, $info: InfoInput) {
+    test_and_set_branch(branch: $branch, key: $key, test: $test, set: $set, info: $info)
+  }
+|}
+
 let update_tree = {|
   mutation UpdateTree($branch: BranchName!, $key: Key!, $tree: [TreeItem]!, $info: InfoInput) {
     update_tree(branch: $branch, key: $key, tree: $tree, info: $info) {
@@ -298,6 +304,8 @@ let all = [
   "find_object", find_object;
   "find_tree", find_tree;
   "find_node", find_node;
+  "test_and_set", test_and_set;
+  "test_and_set_branch", test_and_set_branch;
 ]
 
 let generate_json () =
