@@ -32,13 +32,13 @@ struct
       let merge: [`Read | `Write] t -> key option Irmin.Merge.t = fun t ->
         Irmin.(Merge.v (Type.option Key.t) (fun ~old a b ->
           old () >>= function
-          | Ok x ->
-            let old = match x with
+          | Ok old ->
+            let old = match old with
               | Some (Some x) -> Some x
               | Some None -> None
               | None -> None
             in
-            (Graphql.Private.merge_objects t ~old a b >|= function
+            (Graphql.Private.merge_objects t ~old:(Some old) a b >|= function
             | Ok x -> Ok x
             | Error (`Msg s) ->
                 Error (Graphql.unwrap (Irmin.Type.of_string Merge.conflict_t s)))
@@ -47,7 +47,8 @@ struct
       let find t k =
         Graphql.find_object t k >|= function
         | Ok (Some x) -> Some x
-        | _ -> None
+        | Ok None -> None
+        | Error _ as e -> Graphql.unwrap e
 
       let mem t k =
         find t k >|= function
@@ -171,8 +172,7 @@ struct
         Lwt.return_unit
 
       let set t branch hash =
-        Graphql.set_branch t branch hash >>= fun x ->
-        let _ = Graphql.unwrap x in
+        Graphql.set_branch t branch hash >|= Graphql.unwrap >>= fun () ->
         Watch.notify w branch (Some hash) >>= fun () ->
         Lwt.return_unit
 

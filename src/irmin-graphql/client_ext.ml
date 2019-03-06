@@ -221,7 +221,7 @@ module type EXT = sig
     t -> Branch.t -> (commit, error) result Lwt.t
 
   val set_branch:
-    t -> Branch.t -> Hash.t -> (bool, error) result Lwt.t
+    t -> Branch.t -> Hash.t -> (unit, error) result Lwt.t
 
   val remove_branch:
     t -> Branch.t -> (bool, error) result Lwt.t
@@ -253,7 +253,7 @@ module type EXT = sig
 
     val merge_objects:
       t
-      -> old:Hash.t option
+      -> old:Hash.t option option
       -> Hash.t option
       -> Hash.t option
       -> (Hash.t option, error) result Lwt.t
@@ -846,8 +846,8 @@ struct
     execute_json client ~vars Query.set_branch >|= function
     | Ok j ->
       (match Json.find j ["data"; "set_branch"] with
-       | Some s -> Ok (Json.to_string s = "true")
-       | None -> (invalid_response "set_branch"))
+       | Some (`Bool true) -> Ok ()
+       | _ -> (invalid_response "set_branch"))
     | Error msg -> error_msg msg
 
   let remove_branch client branch  =
@@ -858,8 +858,8 @@ struct
     execute_json client ~vars Query.remove_branch >|= function
     | Ok j ->
       (match Json.find j ["data"; "remove_branch"] with
-       | Some s -> Ok (Json.to_string s = "true")
-       | None -> (invalid_response "remove_branch"))
+       | Some (`Bool b) -> Ok b
+       | _ -> (invalid_response "remove_branch"))
     | Error msg -> error_msg msg
 
   module Private = struct
@@ -907,9 +907,9 @@ struct
 
     let merge_objects client ~old a b =
       let opt = function None -> `Null | Some x -> `String (Irmin.Type.to_string Hash.t x) in
-      let old = opt old in
       let a = opt a in
       let b = opt b in
+      let old = match old with Some old -> opt old | None -> `Null in
       let vars = [
         "a", a;
         "b", b;
@@ -937,8 +937,7 @@ struct
       execute_json client ~vars Query.test_and_set_branch >|= function
       | Ok j ->
           (match Json.find j ["data"; "test_and_set_branch"] with
-          | Some (`Bool true) -> Ok true
-          | Some (`Bool false) -> Ok false
+          | Some (`Bool b) -> Ok b
           | _ -> invalid_response "test_and_set_branch")
       | Error e -> Error e
   end

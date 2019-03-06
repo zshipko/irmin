@@ -280,7 +280,9 @@ module Make(Server: Cohttp_lwt.S.Server)(Config: CONFIG)(Store : Irmin.S) = stru
                 ~typ:(string)
                 ~resolve:(fun _ (s, _) key ->
                     Store.find s key >>= function
-                    | Some v -> Lwt.return_ok (Some (Irmin.Type.to_string Store.contents_t v))
+                    | Some v ->
+                        let x = Irmin.Type.to_string Store.contents_t v in
+                        Lwt.return_ok (Some x)
                     | None -> Lwt.return_ok None
                   )
               ;
@@ -354,7 +356,8 @@ module Make(Server: Cohttp_lwt.S.Server)(Config: CONFIG)(Store : Irmin.S) = stru
                     Store.Tree.find tree key >|= function
                     | None -> Ok None
                     | Some contents ->
-                      Ok (Some (Irmin.Type.to_string Store.contents_t contents))
+                      let x = Irmin.Type.to_string Store.contents_t contents in
+                      Ok (Some x)
                   )
               ;
               io_field "hash"
@@ -680,7 +683,7 @@ module Make(Server: Cohttp_lwt.S.Server)(Config: CONFIG)(Store : Irmin.S) = stru
             Store.Commit.of_hash (Store.repo s) commit >>= function
             | Some commit ->
               Store.Branch.set (Store.repo s) branch commit >>= fun () ->  Lwt.return_ok true
-            | None -> Lwt.return_ok false
+            | None -> Lwt.return_error "invalid commit hash"
           );
       io_field "remove_branch"
         ~typ:(non_null bool)

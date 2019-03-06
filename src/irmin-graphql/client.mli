@@ -247,7 +247,7 @@ module type EXT = sig
     t -> Branch.t -> (commit, error) result Lwt.t
 
   val set_branch:
-    t -> Branch.t -> Hash.t -> (bool, error) result Lwt.t
+    t -> Branch.t -> Hash.t -> (unit, error) result Lwt.t
 
   val remove_branch:
     t -> Branch.t -> (bool, error) result Lwt.t
@@ -279,7 +279,7 @@ module type EXT = sig
 
     val merge_objects:
       t
-      -> old:Hash.t option
+      -> old:Hash.t option option
       -> Hash.t option
       -> Hash.t option
       -> (Hash.t option, error) result Lwt.t
