@@ -130,7 +130,7 @@ module Json_value = struct
           false
 
 
-  let t = Type.like' ~equal ~cli:(pp, of_string) t
+  let t = Type.like ~equal ~cli:(pp, of_string) t
 
   let rec merge_object ~old x y =
     let open Merge.Infix in
@@ -199,7 +199,7 @@ module Json = struct
     Json_value.equal (`O a) (`O b)
 
   let t = Type.(list (pair string Json_value.t))
-  let t = Type.like' ~equal ~cli:(pp, of_string) t
+  let t = Type.like ~equal ~cli:(pp, of_string) t
 
   let merge =
     Merge.(option (alist Type.string Json_value.t (fun _ -> Json_value.merge)))
@@ -265,6 +265,8 @@ module Bytes = struct
   let merge = Merge.idempotent Type.(option t)
 end
 
+module type STORE = S.CONTENTS_STORE
+
 module Store
     (S: sig
        include S.CONTENT_ADDRESSABLE_STORE
@@ -272,7 +274,17 @@ module Store
        module Val: S.CONTENTS with type t = value
      end) =
 struct
-  include S
+
+  module Key = Hash.With_digest(S.Key)(S.Val)
+  module Val = S.Val
+
+  type 'a t = 'a S.t
+  type key = S.key
+  type value = S.value
+
+  let find = S.find
+  let add = S.add
+  let mem = S.mem
 
   let read_opt t = function
     | None   -> Lwt.return_none

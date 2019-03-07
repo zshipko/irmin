@@ -106,7 +106,7 @@ struct
   let step_t = P.step_t
   let hash_t = K.t
   let metadata_t = M.t
-  let t = Type.like Type.(list (pair P.step_t value_t)) of_list list
+  let t = Type.like_map Type.(list (pair P.step_t value_t)) of_list list
 
 end
 
@@ -125,7 +125,7 @@ module Store
 struct
 
   module Contents = C
-  module Key = S.Key
+  module Key = Hash.With_digest(S.Key)(S.Val)
   module Path = P
   module Metadata = M
 

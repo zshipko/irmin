@@ -160,7 +160,7 @@ module Make_private
       include C
 
       let to_bin t =
-        let blob = G.Value.Blob.of_string (Irmin.Type.encode_bin C.t t) in
+        let blob = G.Value.Blob.of_string (Irmin.Type.to_bin_string C.t t) in
         match Raw.to_raw (G.Value.blob blob) with
         | Error _ -> assert false
         | Ok s    -> s
@@ -177,7 +177,7 @@ module Make_private
         let buf = Cstruct.of_string buf in
         let buf = Cstruct.shift buf off in
         let blob t =
-          match Irmin.Type.decode_bin C.t (G.Value.Blob.to_string t) with
+          match Irmin.Type.of_bin_string C.t (G.Value.Blob.to_string t) with
           | Ok t -> t
           | Error (`Msg e) -> Fmt.failwith "cannot read blob: %s" e
         in
@@ -188,7 +188,7 @@ module Make_private
 
       let size_of t = `Buffer (to_bin t)
 
-    let t = Irmin.Type.like' ~bin:(encode_bin, decode_bin, size_of) t
+    let t = Irmin.Type.like ~bin:(encode_bin, decode_bin, size_of) t
   end
     module Key = H
   end
@@ -317,7 +317,7 @@ module Make_private
        let size_of t = `Buffer (to_bin t)
 
        let t =
-         Irmin.Type.like ~bin:(encode_bin, decode_bin, size_of) N.t of_n to_n
+         Irmin.Type.like_map ~bin:(encode_bin, decode_bin, size_of) N.t of_n to_n
     end
 
     include Content_addressable (struct
@@ -430,7 +430,7 @@ module Make_private
       let size_of t = `Buffer (to_bin t)
 
       let t =
-        Irmin.Type.like ~bin:(encode_bin, decode_bin, size_of) C.t of_c to_c
+        Irmin.Type.like_map ~bin:(encode_bin, decode_bin, size_of) C.t of_c to_c
     end
 
     module Key = H
@@ -785,7 +785,7 @@ module Reference: BRANCH with type t = reference = struct
     |~ case1 "other"  string (fun t -> `Other t)
     |> sealv
 
-  let t = Irmin.Type.like' t ~cli:(pp_ref, of_ref)
+  let t = Irmin.Type.like t ~cli:(pp_ref, of_ref)
 
   let master = `Branch Irmin.Branch.String.master
 
@@ -1082,7 +1082,7 @@ module Generic
       (S.Private.Contents.Val)
       (S.Private.Node.Path)
       (S.Branch)
-      (S.Private.Contents.Key)
+      (S.Private.Hash)
       (S.Private.Node.Val)
       (S.Private.Commit.Val)
 end

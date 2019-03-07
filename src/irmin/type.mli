@@ -102,16 +102,7 @@ type 'a size_of = 'a -> [ `Size of int | `Buffer of string ]
 val size_of: 'a t -> 'a size_of
 (* like *)
 
-val like: 'a t ->
-  ?cli:('b pp * 'b of_string) ->
-  ?json:('b encode_json * 'b decode_json) ->
-  ?bin:('b encode_bin * 'b decode_bin * 'b size_of) ->
-  ?equal:('b -> 'b -> bool) ->
-  ?compare:('b -> 'b -> int) ->
-  ?hash:('b -> int) ->
-  ('a -> 'b) -> ('b -> 'a) -> 'b t
-
-val like':
+val like:
   ?cli:('a pp * 'a of_string) ->
   ?json:('a encode_json * 'a decode_json) ->
   ?bin:('a encode_bin * 'a decode_bin * 'a size_of) ->
@@ -119,6 +110,15 @@ val like':
   ?compare:('a -> 'a -> int) ->
   ?hash:('a -> int) ->
   'a t -> 'a t
+
+val like_map: 'a t ->
+  ?cli:('b pp * 'b of_string) ->
+  ?json:('b encode_json * 'b decode_json) ->
+  ?bin:('b encode_bin * 'b decode_bin * 'b size_of) ->
+  ?equal:('b -> 'b -> bool) ->
+  ?compare:('b -> 'b -> int) ->
+  ?hash:('b -> int) ->
+  ('a -> 'b) -> ('b -> 'a) -> 'b t
 
 (* convenient functions. *)
 
@@ -133,8 +133,11 @@ val decode_json_lexemes: 'a t -> Jsonm.lexeme list -> ('a, [`Msg of string]) res
 val to_json_string: ?minify:bool -> 'a t -> 'a to_string
 val of_json_string: 'a t -> 'a of_string
 
-val encode_bin: ?buf:bytes -> 'a t -> 'a to_string
-val decode_bin: ?exact:bool -> 'a t -> 'a of_string
+val encode_bin: 'a t -> 'a encode_bin
+val to_bin_string: 'a t -> 'a to_string
+
+val decode_bin: 'a t -> 'a decode_bin
+val of_bin_string: 'a t -> 'a of_string
 
 type 'a ty = 'a t
 

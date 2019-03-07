@@ -73,7 +73,7 @@ type 'a of_string = string -> ('a, [`Msg of string]) result
 type 'a to_string = 'a -> string
 type 'a encode_json = Jsonm.encoder -> 'a -> unit
 type 'a decode_json = Json.decoder -> ('a, [`Msg of string]) result
-type 'a encode_bin =  bytes -> int -> 'a -> int
+type 'a encode_bin = bytes -> int -> 'a -> int
 type 'a decode_bin = string -> int -> int * 'a
 type 'a size_of = 'a -> [ `Size of int | `Buffer of string ]
 type 'a compare = 'a -> 'a -> int
@@ -253,7 +253,7 @@ let split3 = function
   | Some (x, y, z) -> Some x, Some y, Some z
   | None           -> None  , None  , None
 
-let like (type a b) (x: a t) ?cli ?json ?bin ?equal ?compare ?hash
+let like_map (type a b) (x: a t) ?cli ?json ?bin ?equal ?compare ?hash
     (f: a -> b) (g: b -> a) =
   let pp, of_string = split2 cli in
   let encode_json, decode_json = split2 json in
@@ -264,8 +264,8 @@ let like (type a b) (x: a t) ?cli ?json ?bin ?equal ?compare ?hash
          encode_bin; decode_bin; size_of;
          compare; equal; hash }
 
-let like' ?cli ?json ?bin ?equal ?compare ?hash t =
-  like ?cli ?json ?bin ?equal ?compare ?hash t (fun x -> x) (fun x -> x)
+let like ?cli ?json ?bin ?equal ?compare ?hash t =
+  like_map ?cli ?json ?bin ?equal ?compare ?hash t (fun x -> x) (fun x -> x)
 
 (* fix points *)
 
@@ -1018,9 +1018,7 @@ end
 let size_of t x =
   let rec aux: type a. a t -> a size_of = fun t x -> match t with
     | Like l when l.size_of = None -> aux l.x (l.g x)
-    | Self s           -> aux s.self x
-    | Prim (String _)  -> `Size (String.length x)
-    | Prim (Bytes _)   -> `Size (Bytes.length x)
+    | Self s                       -> aux s.self x
     | _ -> Size_of.t t x
   in
   aux t x
@@ -1180,10 +1178,15 @@ module Encode_bin = struct
 
 end
 
-let err_invalid_bounds =
-  Fmt.invalid_arg "Irmin.Type.%s: invalid bounds; expecting %d, got %d"
+let encode_bin t buf off x =
+  let rec aux: type a. a t -> a -> int = fun t x -> match t with
+    | Like l when l.encode_bin = None -> aux l.x (l.g x)
+    | Self s -> aux s.self x
+    | _ -> Encode_bin.t t buf off x
+  in
+  aux t x
 
-let encode_bin_bytes ?buf t x =
+let to_bin_bytes t x =
   let rec aux: type a. a t -> a -> bytes = fun t x -> match t with
     | Like l when l.encode_bin = None -> aux l.x (l.g x)
     | Self s           -> aux s.self x
@@ -1193,27 +1196,20 @@ let encode_bin_bytes ?buf t x =
       match size_of t x with
       | `Buffer b -> Bytes.unsafe_of_string b
       | `Size len ->
-        let exact, buf = match buf with
-          | None     -> true, Bytes.create len
-          | Some buf ->
-            if len > Bytes.length buf then
-              err_invalid_bounds "Type.encode_bytes" len (Bytes.length buf)
-            else
-              false, buf
-        in
+        let buf = Bytes.create len in
         let len' = Encode_bin.t t buf 0 x in
-        if exact then assert (len = len');
+        assert (len = len');
         buf
   in
   aux t x
 
-let encode_bin ?buf t x =
+let to_bin_string t x =
   let rec aux: type a. a t -> a -> string = fun t x -> match t with
     | Like l when l.encode_bin = None -> aux l.x (l.g x)
     | Self s           -> aux s.self x
     | Prim (String _)  -> x
     | Prim (Bytes _)   -> Bytes.to_string x
-    | _ -> Bytes.unsafe_to_string (encode_bin_bytes ?buf t x)
+    | _ -> Bytes.unsafe_to_string (to_bin_bytes t x)
   in
   aux t x
 
@@ -1353,7 +1349,15 @@ let map_result f = function
   | Ok x -> Ok (f x)
   | Error _ as e -> e
 
-let decode_bin ?(exact=true) t x =
+let decode_bin t buf off =
+  let rec aux : type a. a t -> string -> (int * a) = fun t x -> match t with
+    | Like l when l.decode_bin = None -> let n, v = aux l.x x in n, l.f v
+    | Self s          -> aux s.self x
+    | _               -> Decode_bin.t t buf off
+  in
+  aux t buf
+
+let of_bin_string t x =
   let rec aux
     : type a. a t -> string -> (a, [`Msg of string]) result
     = fun t x -> match t with
@@ -1363,7 +1367,7 @@ let decode_bin ?(exact=true) t x =
       | Prim (Bytes _)  -> Ok (Bytes.of_string x)
       | _ ->
         let last, v = Decode_bin.t t x 0 in
-        if exact then assert (last = String.length x);
+        assert (last = String.length x);
         Ok v
   in
   try aux t x
@@ -1426,7 +1430,7 @@ type 'a ty = 'a t
 
 let hash t x = match t with
   | Like { hash = Some h; _ } -> h x
-  | _ -> Hashtbl.hash (encode_bin t x)
+  | _ -> Hashtbl.hash (to_bin_string t x)
 
 module type S = sig
   type t

@@ -31,7 +31,7 @@ module Make (H: Digestif.S) = struct
   let pp_hex ppf x = Fmt.string ppf (H.to_hex x)
 
   let t =
-    Type.like ~cli:(pp_hex, of_hex)
+    Type.like_map ~cli:(pp_hex, of_hex)
       Type.(string_of (`Fixed digest_size))
       H.of_raw_string H.to_raw_string
 end
@@ -44,3 +44,8 @@ module SHA384 = Make(Digestif.SHA384)
 module SHA512 = Make(Digestif.SHA512)
 module BLAKE2B = Make(Digestif.BLAKE2B)
 module BLAKE2S = Make(Digestif.BLAKE2S)
+
+module With_digest (K: S.HASH) (V: Type.S) = struct
+  include K
+  let digest v = K.digest (Type.to_bin_string V.t v)
+end

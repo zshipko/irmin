@@ -20,7 +20,10 @@ struct
 
     module Contents = struct
       module Metadata = M
-      module Key = Hash
+      module Key = struct
+        include Hash
+        let digest v = Hash.digest (Irmin.Type.to_string C.t v)
+      end
       module Val = C
       type 'a t = Graphql.t
       type key = Key.t

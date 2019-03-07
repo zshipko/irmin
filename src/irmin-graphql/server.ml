@@ -34,9 +34,9 @@ module type CONFIG = sig
 end
 
 module Make(Server: Cohttp_lwt.S.Server)(Config: CONFIG)(Store : Irmin.S) = struct
+  module IO = Server.IO
   module Sync = Irmin.Sync (Store)
   module Graphql_server = Graphql_server(Server.IO)
-  module IO = Server.IO
 
   type response_action =
     [ `Expert of Cohttp.Response.t

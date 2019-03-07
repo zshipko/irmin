@@ -434,22 +434,26 @@ module Type: sig
   type 'a size_of = 'a -> [`Size of int | `Buffer of string]
     (** The type for size function related to binary encoder/decoders. *)
 
-  val encode_bin: ?buf:bytes -> 'a t -> 'a -> string
-  (** [encode_bin t e] encodes [t] into a [string] buffer. The size
-     of the returned buffer is precomputed and the buffer is allocated
-     at once or it can be passed using the optional argument [buf].
+  val encode_bin: 'a t -> 'a encode_bin
+  (** [encode_bin t] is the binary encoder for values of type [t]. *)
 
-      {b NOTE:} There is a special case when the parameter [t] is a
-     single buffer (of type [bytes] or [string]): the original value
-     is returned as is, without being copied. *)
+  val decode_bin: 'a t -> 'a decode_bin
+  (** [decode_bin t] is the binary decoder for values of type [t]. *)
 
-  val decode_bin: ?exact:bool -> 'a t -> string -> ('a, [`Msg of string]) result
-  (** [decode_bin t buf] decodes values of type [t] as produced by
-      [encode_string t v].
+  val to_bin_string: 'a t -> 'a -> string
+  (** [to_bin_string t x] use {!encode_bin} to convert [x], of type
+     [t], to a string.
 
-      {b NOTE:} When the parameter [t] is a single buffer (of type
-      [bytes] or [string]) the original buffer is returned without
-      being copied. *)
+      {b NOTE:} When [t] is {!Type.string} or {!Type.bytes}, the
+     original buffer [x] is not prefixed by its size as {!encode_bin}
+     would do. If [t] is {!Type.string}, the result is [x] (without
+     copy). *)
+
+  val of_bin_string:'a t -> string -> ('a, [`Msg of string]) result
+  (** [of_bin_string t s] is [v] such that [s = to_bin_string t v].
+
+      {b NOTE:} When [t] is {!Type.string}, the result is [x] (without
+     copy). *)
 
   val size_of: 'a t -> 'a -> [`Size of int | `Buffer of string]
   (** [size_of t x] is either the size of [encode_bin t x] or the
@@ -458,16 +462,7 @@ module Type: sig
 
   (** {1 Customs converters} *)
 
-  val like: 'a t ->
-    ?cli:('b pp * 'b of_string) ->
-    ?json:('b encode_json * 'b decode_json) ->
-    ?bin:('b encode_bin * 'b decode_bin * 'b size_of) ->
-    ?equal:('b -> 'b -> bool) ->
-    ?compare:('b -> 'b -> int) ->
-    ?hash:('b -> int) ->
-     ('a -> 'b) -> ('b -> 'a) -> 'b t
-
-  val like':
+  val like:
     ?cli:('a pp * 'a of_string) ->
     ?json:('a encode_json * 'a decode_json) ->
     ?bin:('a encode_bin * 'a decode_bin * 'a size_of) ->
@@ -475,6 +470,15 @@ module Type: sig
     ?compare:('a -> 'a -> int) ->
     ?hash:('a -> int) ->
     'a t -> 'a t
+
+  val like_map: 'a t ->
+    ?cli:('b pp * 'b of_string) ->
+    ?json:('b encode_json * 'b decode_json) ->
+    ?bin:('b encode_bin * 'b decode_bin * 'b size_of) ->
+    ?equal:('b -> 'b -> bool) ->
+    ?compare:('b -> 'b -> int) ->
+    ?hash:('b -> int) ->
+     ('a -> 'b) -> ('b -> 'a) -> 'b t
 
   type 'a ty = 'a t
   module type S = sig type t val t: t ty end
@@ -1147,7 +1151,10 @@ module Contents: sig
 
         If any of these operations fail, return [`Conflict]. *)
 
-    module Key: Hash.S with type t = key
+    module Key: sig
+      include Hash.S with type t = key
+      val digest: value -> key
+    end
     (** [Key] provides base functions for user-defined contents keys. *)
 
     module Val: S with type t = value
@@ -1557,7 +1564,10 @@ module Private: sig
       val merge: [`Read | `Write] t -> key option Merge.t
       (** [merge] is the 3-way merge function for nodes keys. *)
 
-      module Key: Hash.S with type t = key
+      module Key: sig
+        include Hash.S with type t = key
+        val digest: value -> key
+      end
       (** [Key] provides base functions for node keys. *)
 
       module Metadata: Metadata.S
@@ -1591,7 +1601,7 @@ module Private: sig
              and type value = S.value
              and module Path = P
              and module Metadata = M
-             and module Key = S.Key
+             and type Key.t = S.Key.t
              and module Val = S.Val
 
 
@@ -1750,7 +1760,10 @@ module Private: sig
       val merge: [`Read | `Write] t -> info:Info.f -> key option Merge.t
       (** [merge] is the 3-way merge function for commit keys. *)
 
-      module Key: Hash.S with type t = key
+      module Key: sig
+        include Hash.S with type t = key
+        val digest: value -> key
+      end
       (** [Key] provides base functions for commit keys. *)
 
       (** [Val] provides functions for commit values. *)
@@ -1773,7 +1786,7 @@ module Private: sig
       STORE with type 'a t = 'a N.t * 'a S.t
              and type key = S.key
              and type value = S.value
-             and module Key = S.Key
+             and type Key.t = S.Key.t
              and module Val = S.Val
 
     (** [History] specifies the signature for commit history. The
@@ -2947,6 +2960,26 @@ module type S = sig
   type remote += E of Private.Sync.endpoint
   (** Extend the [remote] type with [endpoint]. *)
 
+  (** {2 Converters to private types} *)
+
+  val to_private_node: node -> Private.Node.value option Lwt.t
+  (** [to_private_node n] is the private node objects built using [n].
+     The operation can fetch the database to read an object as [n]
+     could be represented as a hash. The result is [None] iff that
+     hash doesn't exist in the database. *)
+
+  val of_private_node: repo -> Private.Node.value -> node
+  (** [of_private_node r n] is the node build from the private node
+     object [n]. *)
+
+  val to_private_commit: commit -> Private.Commit.value
+  (** [to_private_commit c] is the private commit object associated
+     with the commit [c]. *)
+
+  val of_private_commit: repo -> Private.Commit.value -> commit
+  (** [of_private_commit r c] is the commit associated with the
+     private commit object [c]. *)
+
 end
 
 (** [Json_tree] is used to project JSON values onto trees. Instead of the entire object being stored under one key, it
@@ -2988,9 +3021,9 @@ module type S_MAKER = functor
      and type contents = C.t
      and type branch = B.t
      and type hash = H.t
-
 (** [KV] is similar to {!S} but choose sensible implementations for
     path and branch. *)
+
 module type KV =
   S with type key = string list
      and type step = string

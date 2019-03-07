@@ -94,14 +94,14 @@ module Make (P: S.PRIVATE) = struct
         (fun _ -> assert false)
       |> sealv
 
-    let t = Type.like value (fun v -> { v }) (fun t -> t.v)
+    let t = Type.like_map value (fun v -> { v }) (fun t -> t.v)
 
     let of_contents c = { v = Contents c }
     let of_key db k = { v = Key (db, k) }
 
     let key c = match c.v with
       | Both (_, k, _) | Key (_, k) -> k
-      | Contents v -> P.Hash.digest (Type.encode_bin P.Contents.Val.t v)
+      | Contents v -> P.Contents.Key.digest v
 
     let v t = match t.v with
       | Both (_, _, c)
@@ -180,7 +180,7 @@ module Make (P: S.PRIVATE) = struct
         List.fold_left (fun acc (k, v) -> StepMap.add k v acc) StepMap.empty x
       in
       let of_map m = StepMap.fold (fun k v acc -> (k, v) :: acc) m [] in
-      like (list (pair Path.step_t value)) to_map of_map
+      like_map (list (pair Path.step_t value)) to_map of_map
 
     let node map =
       let open Type in
@@ -193,7 +193,7 @@ module Make (P: S.PRIVATE) = struct
       |~ case1 "Both" (pair P.Node.Key.t map) (fun _ -> assert false)
       |> sealv
 
-    let t node = Type.like node (fun v -> { v }) (fun t -> t.v)
+    let t node = Type.like_map node (fun v -> { v }) (fun t -> t.v)
 
     let _, t = Type.mu2 (fun _ y ->
         let value = value y in
@@ -207,6 +207,21 @@ module Make (P: S.PRIVATE) = struct
 
     let of_map map = { v = Map map }
     let of_key repo k = { v = Key (repo, k) }
+
+    let of_node repo n =
+      let entries = P.Node.Val.list n in
+      let aux = function
+        | `Node h -> `Node (of_key repo h)
+        | `Contents (c, m) -> `Contents (Contents.of_key repo c, m)
+      in
+      let entries =
+        List.fold_left
+          (fun acc (k, v) -> StepMap.add k (aux v) acc)
+          StepMap.empty
+          entries
+      in
+      of_map entries
+
     let empty = of_map StepMap.empty
 
     let import t n =
@@ -236,8 +251,7 @@ module Make (P: S.PRIVATE) = struct
       P.Node.Val.v alist
 
     and key_of_map map =
-      let v = export_map map in
-      P.Hash.digest (Type.encode_bin P.Node.Val.t v)
+      P.Node.Key.digest (export_map map)
 
     let to_map t = match t.v with
       | Map m | Both (_, _, m) -> Lwt.return (Some m)
@@ -249,6 +263,17 @@ module Make (P: S.PRIVATE) = struct
           let n = import db n in
           t.v <- Both (db, k, n);
           Some n
+
+    let to_node t = match t.v with
+      | Key (db, k) -> P.Node.find (P.Repo.node_t db) k
+      | Map m | Both (_, _, m) ->
+          let aux = function
+            | `Contents (c, m) -> `Contents (Contents.key c, m)
+            | `Node n -> `Node (key n)
+          in
+          let entries = StepMap.bindings m in
+          let entries = List.rev_map (fun (k, v) -> k, aux v) entries in
+          Lwt.return (Some (P.Node.Val.v entries))
 
     let key_equal x y =
       x == y ||
@@ -450,34 +475,14 @@ module Make (P: S.PRIVATE) = struct
             | `Node n          -> clear_caches n
           ) m
 
-    (*
-    let contents  =
-      let open Type in
-      variant "Node.contents" (fun keep set -> function
-          | `Keep x -> keep x
-          | `Set x  -> set x)
-      |~ case1 "Keep" P.Contents.Val.t (fun x -> `Keep x)
-      |~ case1 "Set" (pair P.Contents.Val.t Metadata.t) (fun x -> `Set x)
-      |> sealv
-
-    type update = [
-      | `Contents of [ `Keep of contents | `Set of contents * Metadata.t ]
-      | `Node of t ]
-
-    let update: update Type.t =
-      let open Type in
-      variant "Node.update" (fun contents node -> function
-          | `Contents x -> contents x
-          | `Node x     -> node x)
-      |~ case1 "Contents" contents (fun x -> `Contents x)
-      |~ case1 "Node" t (fun x -> `Node x)
-      |> sealv
-    *)
   end
 
   type node = Node.t
   type metadata = Metadata.t
   type tree = [ `Node of node | `Contents of contents * metadata ]
+
+  let of_private_node = Node.of_node
+  let to_private_node = Node.to_node
 
   let node_t = Node.t
 
@@ -1025,7 +1030,5 @@ module Make (P: S.PRIVATE) = struct
 
   let hash (t:tree) = match t with
     | `Node n -> `Node (Node.key n)
-    | `Contents (c, m) ->
-      let str = Type.encode_bin P.Contents.Val.t c in
-      `Contents (P.Hash.digest str, m)
+    | `Contents (c, m) -> `Contents (P.Contents.Key.digest c, m)
 end
