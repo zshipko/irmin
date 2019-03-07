@@ -128,7 +128,7 @@ let run () =
   if (Array.length Sys.argv > 1 && Sys.argv.(1) = "server") then
     run_server ()
   else
-    let _ = Sys.command (Printf.sprintf "dune exec -- %s server & echo $! > %s" Sys.argv.(0) pid_file) in
+    let _ = Sys.command (Printf.sprintf "dune exec --root . -- %s server & echo $! > %s" Sys.argv.(0) pid_file) in
     let () = server_pid := wait_for_the_server_to_start () in
     let () = at_exit clean in
     Irmin_test.Store.run "irmin-graphql" ~misc:[] (suites servers)
