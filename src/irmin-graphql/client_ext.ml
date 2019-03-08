@@ -868,8 +868,12 @@ struct
         [ "info", mk_info ?author ?message ?parents ()
         ; "node", `String (Irmin.Type.to_string Hash.t node) ]
       in
-      execute_json client ~vars Query.add_commit
-      >>= decode_hash "add_commit" ["add_commit"] >|= unwrap_option "add_commit"
+      execute_json client ~vars Query.add_commit >|= function
+      | Ok j ->
+        (match Json.find j ["data"; "add_commit"] with
+         | Some (`String s) -> Irmin.Type.of_string Hash.t s
+         | _ -> (invalid_response "add_commit"))
+      | Error msg -> error_msg msg
 
     let add_node client node =
       let vars =
@@ -930,9 +934,9 @@ struct
       let opt = function None -> `Null | Some x -> `String (Irmin.Type.to_string Hash.t x) in
       let branch = opt_branch client.branch in
       let vars = [
+        "branch", branch;
         "test", opt test;
         "set", opt set;
-        "branch", branch;
       ] in
       execute_json client ~vars Query.test_and_set_branch >|= function
       | Ok j ->

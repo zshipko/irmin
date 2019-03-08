@@ -37,11 +37,11 @@ struct
           old () >>= function
           | Ok old ->
             let old = match old with
-              | Some (Some x) -> Some x
-              | Some None -> None
+              | Some (Some x) -> Some (Some x)
+              | Some None -> Some None
               | None -> None
             in
-            (Graphql.Private.merge_objects t ~old:(Some old) a b >|= function
+            (Graphql.Private.merge_objects t ~old a b >|= function
             | Ok x -> Ok x
             | Error (`Msg s) ->
                 Error (Graphql.unwrap (Irmin.Type.of_string Merge.conflict_t s)))

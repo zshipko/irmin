@@ -35,8 +35,8 @@ let test_and_set = {|
 |}
 
 let test_and_set_branch = {|
-  mutation TestAndSetBranch($branch: BranchName, $test: CommitHash!, $set: CommitHash!, $info: InfoInput) {
-    test_and_set_branch(branch: $branch, key: $key, test: $test, set: $set, info: $info)
+  mutation TestAndSetBranch($branch: BranchName, $test: CommitHash!, $set: CommitHash!) {
+    test_and_set_branch(branch: $branch, test: $test, set: $set)
   }
 |}
 
@@ -58,9 +58,7 @@ let set_tree = {|
 
 let add_commit = {|
   mutation AddCommit($node: String!, $info: InfoInput) {
-    add_commit(node: $node, info: $info) {
-      hash
-    }
+    add_commit(node: $node, info: $info)
   }
 |}
 

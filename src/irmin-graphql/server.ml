@@ -697,19 +697,18 @@ module Make(Server: Cohttp_lwt.S.Server)(Config: CONFIG)(Store : Irmin.S) = stru
             else Lwt.return_ok false
           );
       io_field "add_commit"
-        ~typ:(Lazy.force commit)
+        ~typ:(string)
         ~args:Arg.[
           arg "node" ~typ:(non_null Input.object_hash);
           arg "info" ~typ:Input.info;
         ]
         ~resolve:(fun _ _ node info ->
           txn s info >>= fun (info, _, _, parents) ->
-          let parents = match parents with None -> [] | Some x -> x in
-          Store.Tree.of_hash (Store.repo s) node >>= fun tree ->
-          match tree with
-          | Some (`Node tree) ->
-            Store.Commit.v (Store.repo s) ~info:(info ()) ~parents (`Node tree) >>= Lwt.return_some >>= Lwt.return_ok
-          | None -> Lwt.return_none >>= Lwt.return_ok
+          let parents = match parents with None -> [] | Some x -> List.map (Store.Commit.hash) x in
+          let value = Store.Private.Commit.Val.v ~info:(info ()) ~node ~parents in
+          Store.Private.Repo.batch (Store.repo s) (fun _ _ commits ->
+            Store.Private.Commit.add commits value >>= fun x ->
+          Lwt.return_some (Irmin.Type.to_string Store.Hash.t x) >>= Lwt.return_ok)
         );
       io_field "add_node"
         ~typ:string
