@@ -128,6 +128,7 @@ module Make (S : S.STORE) = struct
 
   let pull t ?depth remote kind =
     fetch t ?depth remote >>= function
+    | Error `No_head -> Lwt.return_ok ()
     | Error e -> Lwt.return (Error (e :> pull_error))
     | Ok k -> (
       match kind with
