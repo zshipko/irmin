@@ -27,6 +27,7 @@ depends: [
   "alcotest-lwt" {with-test}
   "astring" {with-test}
   "fpath" {with-test}
+  "rusage"
 ]
 
 pin-depends: [

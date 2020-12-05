@@ -742,7 +742,7 @@ struct
           List.rev_append newies_commits
             (List.rev_append newies_contents newies_nodes)
         in
-        Log.debug (fun l -> l "copy newies");
+        Log.debug (fun l -> l "copy newies: %d" (List.length newies));
         (* we want to copy all the new commits; stop whenever one
            commmit already in the other upper or in lower. *)
         let skip_commits k =
@@ -856,8 +856,14 @@ struct
 
   let pp_commits = Fmt.Dump.list Commit.pp_hash
 
+  let log_maxrss msg =
+    let r = Rusage.(get Self) in
+    let gb = Int64.to_float r.maxrss /. 1024. /. 1024. in
+    Logs.app (fun l -> l "MEM: %s, maxrss: %.2f GB" msg gb)
+
   let unsafe_freeze ~min ~max ~squash ~copy_in_upper ~min_upper ?hook t =
-    Log.info (fun l ->
+    log_maxrss "begin unsafe_freeze";
+    Log.app (fun l ->
         l
           "@[<2>freeze:@ min=%a,@ max=%a,@ squash=%b,@ copy_in_upper=%b@ \
            min_upper=%a@]"
@@ -871,7 +877,7 @@ struct
         w *. 0.000001
       in
       if waiting >= 1.0 then
-        Log.warn (fun l ->
+        Log.app (fun l ->
             l
               "freeze blocked for %f seconds due to a previous unfinished \
                freeze"
@@ -879,27 +885,36 @@ struct
       lock_path t.X.Repo.config |> Lock.v >>= fun lock_file ->
       pause () >>= fun () ->
       may (fun f -> f `Before_Copy) hook >>= fun () ->
+      log_maxrss "before copy";
       copy ~min ~max ~squash ~copy_in_upper ~min_upper t >>= fun () ->
+      log_maxrss "after copy";
       X.Repo.flush_next_lower t;
       may (fun f -> f `Before_Copy_Newies) hook >>= fun () ->
+      log_maxrss "before newies";
       Copy.CopyToUpper.copy_newies_to_next_upper t offset >>= fun () ->
+      log_maxrss "after newies";
       may (fun f -> f `Before_Copy_Last_Newies) hook >>= fun () ->
       Lwt_mutex.with_lock t.add_lock (fun () ->
-          Log.debug (fun l -> l "freeze: enter blocking section");
+          Log.app (fun l -> l "freeze: enter blocking section");
+          log_maxrss "before last newies";
           Copy.CopyToUpper.copy_last_newies_to_next_upper t >>= fun () ->
+          log_maxrss "after last newies";
           may (fun f -> f `Before_Flip) hook >>= fun () ->
+          log_maxrss "before flip upper";
           X.Repo.flip_upper t;
+          log_maxrss "after flip upper";
           may (fun f -> f `Before_Clear) hook >>= fun () ->
           X.Repo.clear_previous_upper t)
       >>= fun () ->
-      Log.debug (fun l -> l "freeze: exit blocking section");
+      Log.app (fun l -> l "freeze: exit blocking section");
       (* RO reads generation from pack file to detect a flip change, so it's
          ok to write the flip file outside the lock *)
       X.Repo.write_flip t >>= fun () ->
       Lock.close lock_file >>= fun () ->
       Lwt_mutex.unlock t.freeze_lock;
       may (fun f -> f `After_Clear) hook >|= fun () ->
-      Log.debug (fun l -> l "freeze: end")
+      Log.app (fun l -> l "freeze: end");
+      log_maxrss "unsafe_freeze end"
     in
     Lwt.async (fun () -> Irmin_layers.Stats.with_timer `Freeze async);
     Lwt.return_unit
