@@ -742,7 +742,7 @@ struct
           List.rev_append newies_commits
             (List.rev_append newies_contents newies_nodes)
         in
-        Log.debug (fun l -> l "copy newies: %d" (List.length newies));
+        Log.app (fun l -> l "copy newies: %d" (List.length newies));
         (* we want to copy all the new commits; stop whenever one
            commmit already in the other upper or in lower. *)
         let skip_commits k =
