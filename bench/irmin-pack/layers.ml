@@ -7,6 +7,7 @@ let reporter ?(prefix = "") () =
       k ()
     in
     let ppf = match level with Logs.App -> Fmt.stdout | _ -> Fmt.stderr in
+    Memstat.pp ppf (Memstat.get ());
     let with_stamp h _tags k fmt =
       let dt = Unix.gettimeofday () in
       Fmt.kpf k ppf
@@ -180,6 +181,11 @@ let print_commit_stats config c i time =
         l "Commit %a %d in cycle completed in %f; objects created: %d"
           Store.Commit.pp_hash c i time num_objects)
 
+let print_memory_stats config =
+  if config.show_stats then
+    let mem = Memstat.get () in
+    Logs.app (fun l -> l "%a" Memstat.pp mem)
+
 let print_stats config =
   let t = Irmin_layers.Stats.get () in
   let copied_objects =
@@ -227,6 +233,7 @@ let consume_min () = Queue.pop min_uppers
 let first_5_cycles config repo =
   init_commit repo >>= fun c ->
   print_commit_stats config c 0 0.0;
+  print_memory_stats config;
   let rec aux i c =
     add_min c;
     if i > 4 then Lwt.return c
@@ -240,6 +247,7 @@ let run_cycles config repo head =
     else
       write_cycle config repo head >>= fun max ->
       print_stats config;
+      print_memory_stats config;
       let min = consume_min () in
       add_min max;
       with_timer (fun () -> freeze ~min_upper:[ min ] ~max:[ max ] config repo)
