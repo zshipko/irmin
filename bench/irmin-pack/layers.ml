@@ -181,12 +181,9 @@ let print_commit_stats config c i time =
   total := !total + num_objects;
   Irmin_layers.Stats.reset_adds ();
   if config.show_stats then
-    let () =
-      Logs.app (fun l ->
-          l "Commit %a %d in cycle completed in %f; objects created: %d"
-            Store.Commit.pp_hash c i time num_objects)
-    in
-    print_memory_stats config num_objects
+    Logs.app (fun l ->
+        l "Commit %a %d in cycle completed in %f; objects created: %d"
+          Store.Commit.pp_hash c i time num_objects)
 
 let print_stats config =
   let t = Irmin_layers.Stats.get () in
@@ -215,6 +212,7 @@ let write_cycle config repo init_commit =
   let rec go c i =
     if i = config.ncommits then Lwt.return c
     else
+      let () = if i mod 5 = 0 then print_memory_stats config i in
       with_timer (fun () ->
           checkout_and_commit config repo (Store.Commit.hash c) i)
       >>= fun (time, c') ->
