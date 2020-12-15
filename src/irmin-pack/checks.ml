@@ -181,12 +181,20 @@ struct
 
     let conf root = Config.v ~readonly:false ~fresh:false root
 
+    let conf root =
+      match detect_layered_store ~root with
+      | false -> conf root
+      | true ->
+          Logs.app (fun f -> f "Layered store detected");
+          let lower_root = Layout.lower ~root
+          and upper_root1 = Layout.upper1 ~root
+          and upper_root0 = Layout.upper0 ~root in
+          Irmin_pack_layers.config_layers ~conf:(conf root) ~with_lower:true
+            ~lower_root ~upper_root0 ~upper_root1 ()
+
     let auto_repair =
       let open Cmdliner.Arg in
-      value
-      & flag
-        @@ info ~doc:"Automatically repair issues" ~docv:"AUTOREPAIR"
-             [ "auto-repair" ]
+      value & (flag @@ info ~doc:"Automatically repair issues" [ "auto-repair" ])
 
     let run ~root ~auto_repair =
       let conf = conf root in
