@@ -177,33 +177,55 @@ struct
   end
 
   module Integrity_check = struct
-    module Store = Ext.Make (Conf) (M) (C) (P) (B) (H) (Node) (Commit)
-
     let conf root = Config.v ~readonly:false ~fresh:false root
 
-    let conf root =
-      match detect_layered_store ~root with
-      | false -> conf root
-      | true ->
-          Logs.app (fun f -> f "Layered store detected");
-          let lower_root = Layout.lower ~root
-          and upper_root1 = Layout.upper1 ~root
-          and upper_root0 = Layout.upper0 ~root in
-          Irmin_pack_layers.config_layers ~conf:(conf root) ~with_lower:true
-            ~lower_root ~upper_root0 ~upper_root1 ()
+    let handle_result ?name =
+      let name = match name with Some x -> ": " ^ x | None -> "" in
+      function
+      | Ok (`Fixed n) -> Printf.printf "Ok%s -- fixed %d\n%!" name n
+      | Ok `No_error -> Printf.printf "Ok%s\n%!" name
+      | Error (`Cannot_fix x) ->
+          Printf.eprintf "Error%s -- cannot fix: %s\n%!" name x
+      | Error (`Corrupted x) ->
+          Printf.eprintf "Error%s -- corrupted: %d\n%!" name x
 
     let auto_repair =
       let open Cmdliner.Arg in
       value & (flag @@ info ~doc:"Automatically repair issues" [ "auto-repair" ])
 
+    let run_simple ~root ~auto_repair =
+      let module Store = Ext.Make (Conf) (M) (C) (P) (B) (H) (Node) (Commit) in
+      let config = conf root in
+      Store.Repo.v config >|= fun repo ->
+      handle_result (Store.integrity_check ~auto_repair repo)
+
     let run ~root ~auto_repair =
-      let conf = conf root in
-      Store.Repo.v conf >|= fun repo ->
-      match Store.integrity_check ~auto_repair repo with
-      | Ok (`Fixed n) -> Printf.printf "Ok -- fixed %d\n%!" n
-      | Ok `No_error -> print_endline "Ok"
-      | Error (`Cannot_fix x) -> Printf.eprintf "Error -- cannot fix: %s\n%!" x
-      | Error (`Corrupted x) -> Printf.eprintf "Error -- corrupted: %d\n%!" x
+      match detect_layered_store ~root with
+      | false -> run_simple ~root ~auto_repair
+      | true ->
+          let module Store =
+            Irmin_pack_layers.Make_ext (Conf) (M) (C) (P) (B) (H) (Node)
+              (Commit)
+          in
+          Logs.app (fun f -> f "Layered store detected");
+          let lower_root = Layout.lower ~root
+          and upper_root1 = Layout.upper1 ~root
+          and upper_root0 = Layout.upper0 ~root in
+          let config =
+            Irmin_pack_layers.config_layers ~conf:(conf root) ~with_lower:true
+              ~lower_root ~upper_root0 ~upper_root1 ()
+          in
+          Store.Repo.v config >|= fun repo ->
+          List.iter
+            (fun x ->
+              match x with
+              | Ok x, l ->
+                  handle_result ~name:(Irmin_layers.Layer_id.to_string l) (Ok x)
+              | Error e, l ->
+                  handle_result
+                    ~name:(Irmin_layers.Layer_id.to_string l)
+                    (Error e))
+            (Store.integrity_check ~auto_repair repo)
 
     let term =
       Cmdliner.Term.(
