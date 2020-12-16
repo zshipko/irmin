@@ -36,6 +36,8 @@ type config = {
 }
 [@@deriving repr]
 
+let start = Unix.gettimeofday ()
+
 let () = Random.self_init ()
 
 let random_char () = char_of_int (Random.int 256)
@@ -214,6 +216,7 @@ let write_cycle config repo init_commit =
   go init_commit 0
 
 let freeze ~min_upper ~max config repo =
+  Logs.app (fun l -> l "Freeze begin: %f" (Unix.gettimeofday () -. start));
   if config.no_freeze then Lwt.return_unit
   else Store.freeze ~max ~min_upper repo
 
