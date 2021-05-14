@@ -643,7 +643,7 @@ struct
         let min = List.map (fun c -> `Commit c) min in
         let+ () =
           Repo.iter ~cache_size ~min ~max ~commit ~node ~contents ~skip_node
-            ~skip_contents ~pred_node ~skip_commit t
+            ~skip_contents ~pred_node ~skip_commit ~pred_commit t
         in
         X.Repo.flush t
 
