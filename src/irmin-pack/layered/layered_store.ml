@@ -129,7 +129,7 @@ struct
     if freeze then t.newies <- k :: t.newies
 
   (** Everything is in current upper, no need to look in next upper. *)
-  let find t k =
+  let _find t k =
     let current = current_upper t in
     Log.debug (fun l -> l "find in %a" pp_current_upper t);
     U.find current k
@@ -140,11 +140,15 @@ struct
     U.find current k >>= function
     | Some v -> Lwt.return_some v
     | None -> (
+        Logs.warn (fun l ->
+            l "find_with_lower: looking for %a" (Irmin.Type.pp H.t) k);
         match t.lower with
         | None -> Lwt.return_none
         | Some lower ->
-            Log.debug (fun l -> l "find in lower");
+            Log.debug (fun l -> l "found in lower: %a" (Irmin.Type.pp H.t) k);
             L.find lower k)
+
+  let find t k = find_with_lower t k
 
   let unsafe_find ~check_integrity t k =
     let current = current_upper t in
