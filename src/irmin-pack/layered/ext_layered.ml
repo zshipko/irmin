@@ -231,6 +231,7 @@ struct
         end
 
         let batch t f =
+          Logs.info (fun l -> l "batch: Acquire batch lock");
           Lwt_mutex.with_lock t.batch_lock @@ fun () ->
           Contents.CA.batch t.contents (fun contents ->
               Node.CA.batch t.node (fun node ->
@@ -826,6 +827,7 @@ struct
            modifications occur until the uppers are flipped. No more cancellations
            from this point on. There are only a few newies left (less than
            [newies_limit] bytes) so this lock should be quickly released. *)
+        Logs.info (fun l -> l "freeze: Acquire batch lock");
         Irmin_layers.Stats.freeze_section "wait for batch lock";
         Irmin_layers.Stats.freeze_yield ();
         Lwt_mutex.with_lock t.batch_lock (fun () ->
@@ -843,12 +845,14 @@ struct
         X.Repo.write_flip t
       in
       let finalize cancelled () =
+        Logs.info (fun l -> l "Freeze finalize, cancalled: %b" cancelled);
         Irmin_layers.Stats.freeze_section "finalize";
         t.freeze.state <- `None;
         (if cancelled then X.Repo.clear_previous_upper ~keep_generation:() t
         else Lwt.return_unit)
         >>= fun () ->
         Lock.close lock_file >>= fun () ->
+        Logs.info (fun l -> l "Unlocking freeze lock");
         Lwt_mutex.unlock t.freeze.lock;
         may (fun f -> f `After_Clear) hook >|= fun () ->
         Irmin_layers.Stats.freeze_stop ();
@@ -874,6 +878,7 @@ struct
       in
       let freeze () =
         let t0 = Mtime_clock.now () in
+        Logs.info (fun l -> l "Locking freeze lock");
         Lwt_mutex.lock t.freeze.lock >>= fun () ->
         t.freeze.state <- `Running;
         Irmin_layers.Stats.freeze_start t0 "wait for freeze lock";
