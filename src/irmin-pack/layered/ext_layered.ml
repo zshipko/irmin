@@ -643,7 +643,7 @@ struct
         let min = List.map (fun c -> `Commit c) min in
         let+ () =
           Repo.iter ~cache_size ~min ~max ~commit ~node ~contents ~skip_node
-            ~skip_contents ~pred_node ~skip_commit ~pred_commit t
+            ~skip_contents ~pred_node ~skip_commit t
         in
         X.Repo.flush t
 
@@ -656,11 +656,10 @@ struct
       (** An object can be in either lower or upper or both. We can't skip an
           object already in upper as some predecessors could still be in lower. *)
       let self_contained ?min ~max t =
-        let max = List.map (fun x -> Commit.hash x) max in
         let min =
           match min with
           | None -> max (* if min is empty then copy only the max commits *)
-          | Some min -> List.map (fun x -> Commit.hash x) min
+          | Some min -> min
         in
         (* FIXME(samoht): do this in 2 steps: 1/ find the shallow
            hashes in upper 2/ iterates with max=shallow
