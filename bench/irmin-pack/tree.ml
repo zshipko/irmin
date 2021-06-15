@@ -366,14 +366,15 @@ let get_suite suite_filter =
 let main () ncommits ncommits_trace suite_filter inode_config store_type
     freeze_commit path_conversion depth width nchain_trees nlarge_trees
     commit_data_file artefacts_dir keep_store keep_stat_trace no_summary
-    empty_blobs =
+    empty_blobs store_dir =
   let default = match suite_filter with `Quick -> 10000 | _ -> 13315 in
   let ncommits_trace = Option.value ~default ncommits_trace in
   let config =
     {
       ncommits;
       ncommits_trace;
-      store_dir = Filename.concat artefacts_dir "store";
+      store_dir =
+        Option.value ~default:(Filename.concat artefacts_dir "store") store_dir;
       path_conversion;
       depth;
       width;
@@ -513,6 +514,10 @@ let depth =
   in
   Arg.(value @@ opt int 1000 doc)
 
+let store_dir =
+  let doc = Arg.info ~doc:"Store path" [ "store-dir" ] in
+  Arg.(value @@ opt (some string) None doc)
+
 let nchain_trees =
   let doc =
     Arg.info ~doc:"Number of chain trees per commit in chains-mode."
@@ -569,7 +574,8 @@ let main_term =
     $ keep_store
     $ keep_stat_trace
     $ no_summary
-    $ empty_blobs)
+    $ empty_blobs
+    $ store_dir)
 
 let () =
   let man =
