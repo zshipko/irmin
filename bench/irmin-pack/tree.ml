@@ -26,6 +26,7 @@ type config = {
   width : int;
   nlarge_trees : int;
   store_dir : string;
+  fresh : bool;
   path_conversion : [ `None | `V1 | `V0_and_v1 | `V0 ];
   inode_config : int * int;
   store_type : [ `Pack | `Pack_layered | `Pack_mem ];
@@ -178,7 +179,9 @@ struct
       (Hash)
 
   let create_repo config =
-    let conf = Irmin_pack.config ~readonly:false ~fresh:true config.store_dir in
+    let conf =
+      Irmin_pack.config ~readonly:false ~fresh:config.fresh config.store_dir
+    in
     let* repo = Store.Repo.v conf in
     let on_commit i commit_hash =
       let* () =
@@ -222,7 +225,9 @@ struct
   type store_config = config
 
   let create_repo config =
-    let conf = Irmin_pack.config ~readonly:false ~fresh:true config.store_dir in
+    let conf =
+      Irmin_pack.config ~readonly:false ~fresh:config.fresh config.store_dir
+    in
     let* repo = Store.Repo.v conf in
     let on_commit _ _ = Lwt.return_unit in
     let on_end () = Lwt.return_unit in
@@ -369,12 +374,14 @@ let main () ncommits ncommits_trace suite_filter inode_config store_type
     empty_blobs store_dir =
   let default = match suite_filter with `Quick -> 10000 | _ -> 13315 in
   let ncommits_trace = Option.value ~default ncommits_trace in
+  let keep_store = keep_store || Option.is_some store_dir in
   let config =
     {
       ncommits;
       ncommits_trace;
       store_dir =
         Option.value ~default:(Filename.concat artefacts_dir "store") store_dir;
+      fresh = Option.is_none store_dir;
       path_conversion;
       depth;
       width;
@@ -393,7 +400,7 @@ let main () ncommits ncommits_trace suite_filter inode_config store_type
   in
   Printexc.record_backtrace true;
   Random.self_init ();
-  FSHelper.rm_dir config.store_dir;
+  if config.fresh then FSHelper.rm_dir config.store_dir;
   let suite = get_suite suite_filter in
   let run_benchmarks () = Lwt_list.map_s (fun b -> b.run config) suite in
   let results =
