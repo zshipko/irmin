@@ -476,6 +476,21 @@ let from_config_file_with_defaults path (store, hash, contents) config branch :
       | None -> S ((module S), mk_master (), remote)
       | Some b -> S ((module S), mk_branch b, remote))
 
+let save_config ~path conf =
+  let open Irmin.Private.Conf in
+  let keys = list_keys conf in
+  let y =
+    Seq.fold_left
+      (fun acc (Key k) ->
+        let v = Irmin.Private.Conf.get conf k in
+        let name = name k in
+        (name, `String (Irmin.Type.to_string (ty k) v)) :: acc)
+      [] keys
+  in
+  let output = open_out path in
+  output_string output (Yaml.to_string_exn (`O y));
+  close_out output
+
 let load_config ?(default = Irmin.Private.Conf.empty) ?config_path ~store ~hash
     ~contents () =
   let cfg =

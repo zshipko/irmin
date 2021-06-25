@@ -46,6 +46,7 @@ end)
 
 type t = Univ.t M.t
 
+let all = Hashtbl.create 8
 let name t = t.name
 let doc t = t.doc
 let docv t = t.docv
@@ -62,7 +63,9 @@ let key ?docs ?docv ?doc name ty default =
       name
   in
   let to_univ, of_univ = Univ.create () in
-  { name; ty; default; to_univ; of_univ; doc; docv; docs }
+  let k = { name; ty; default; to_univ; of_univ; doc; docv; docs } in
+  Hashtbl.replace all name (Key k);
+  k
 
 let empty = M.empty
 let singleton k v = M.singleton (Key k) (k.to_univ v)
