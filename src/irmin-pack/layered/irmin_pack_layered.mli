@@ -14,18 +14,18 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
+val default_config : Irmin.config
+
 val config :
-  ?conf:Irmin.config ->
   ?lower_root:string ->
   ?upper_root1:string ->
   ?upper_root0:string ->
   ?with_lower:bool ->
   ?blocking_copy_size:int ->
-  unit ->
+  Irmin.config ->
   Irmin.config
 (** Configuration options for layered stores.
 
-    @param conf is an irmin-pack configuration.
     @param lower_root is the root of the lower store, "lower" is the default.
     @param upper_root1 is the root of one of the upper stores, "upper1" is the
     default.
@@ -33,7 +33,8 @@ val config :
     default.
     @param with_lower if true (the default) use a lower layer during freezes.
     @param blocking_copy_size specifies the maximum size (in bytes) that can be
-    copied in the blocking portion of the freeze. *)
+    copied in the blocking portion of the freeze.
+    @param config is a valid [Irmin_pack] configuration *)
 
 module type S = sig
   include S.Store
