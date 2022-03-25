@@ -89,19 +89,20 @@ end
 module Default_type (T : sig
   include Irmin.Type.S
 
+  val doc : string
   val name : string
 end) =
 struct
   let schema_typ =
     let coerce t = `String (Irmin.Type.to_string T.t t) in
-    Schema.scalar T.name ~coerce
+    Schema.scalar T.name ~doc:T.doc ~coerce
 
   let arg_typ =
     let coerce = function
       | `String s -> of_irmin_result (Irmin.Type.of_string T.t s)
       | _ -> Error "Invalid input value"
     in
-    Schema.Arg.scalar T.name ~coerce
+    Schema.Arg.scalar T.name ~doc:T.doc ~coerce
 end
 
 module Default_types (S : Irmin.Generic_key.S) = struct
@@ -109,30 +110,38 @@ module Default_types (S : Irmin.Generic_key.S) = struct
     include S.Path
 
     let name = "Path"
+    let doc = "The Path type is used to locate data in a store"
   end)
 
   module Metadata = Default_type (struct
     include S.Metadata
 
     let name = "Metadata"
+
+    let doc =
+      "Metadata is used to provide additional information about data stored in \
+       irmin"
   end)
 
   module Contents = Default_type (struct
     include S.Contents
 
     let name = "Value"
+    let doc = "Values stored in irmin"
   end)
 
   module Hash = Default_type (struct
     include S.Hash
 
     let name = "Hash"
+    let doc = "Hash"
   end)
 
   module Branch = Default_type (struct
     include S.Branch
 
     let name = "BranchName"
+    let doc = "BranchName is used to specify which branch to work on"
   end)
 
   module Commit_key = Default_type (struct
@@ -140,6 +149,7 @@ module Default_types (S : Irmin.Generic_key.S) = struct
 
     let t = S.commit_key_t
     let name = "CommitKey"
+    let doc = "CommitKey"
   end)
 
   module Node_key = Default_type (struct
@@ -147,6 +157,7 @@ module Default_types (S : Irmin.Generic_key.S) = struct
 
     let t = S.node_key_t
     let name = "NodeKey"
+    let doc = "NodeKey"
   end)
 
   module Contents_key = Default_type (struct
@@ -154,6 +165,7 @@ module Default_types (S : Irmin.Generic_key.S) = struct
 
     let t = S.contents_key_t
     let name = "ContentsKey"
+    let doc = "ContentsKey"
   end)
 end
 
