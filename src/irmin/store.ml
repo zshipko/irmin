@@ -1245,6 +1245,18 @@ struct
   let get t key =
     let* tree = Store.get_tree t key in
     get_tree tree Store.Path.empty
+
+  let merge t key j ~info =
+    let* a = Store.get_tree t key in
+    let b = to_concrete_tree j |> Store.Tree.of_concrete in
+    let f = Merge.f Store.Tree.merge in
+    let old = Merge.promise a in
+    let* tree = f ~old a b in
+    match tree with
+    | Ok tree ->
+        let* () = Store.set_tree_exn ~info t key tree in
+        Lwt.return_ok ()
+    | Error e -> Lwt.return_error e
 end
 
 type Remote.t +=

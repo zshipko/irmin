@@ -1097,6 +1097,14 @@ module type Json_tree = functor
   val set :
     Store.t -> Store.path -> t -> info:(unit -> Store.info) -> unit Lwt.t
   (** Project a [json] value onto a store at the given key. *)
+
+  val merge :
+    Store.t ->
+    Store.path ->
+    t ->
+    info:(unit -> Store.info) ->
+    (unit, Merge.conflict) Result.t Lwt.t
+  (** Project a [json] value into a store and combine with existing values *)
 end
 
 module type KV_generic_key =
