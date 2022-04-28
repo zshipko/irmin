@@ -15,6 +15,7 @@
   ocamlgraph
   uri
   uutf
+  lwt_eio
   (re_export repr))
  (preprocess
   (pps ppx_irmin.internal -- --lib "Type"))

@@ -107,7 +107,12 @@ let print_exc exc =
   | e -> Fmt.epr "ERROR: %a\n%!" Fmt.exn e);
   exit 1
 
-let run t = Lwt_main.run (Lwt.catch (fun () -> t) print_exc)
+let eio_run x =
+  Eio_main.run @@ fun env ->
+  Lwt_eio.with_event_loop ~clock:env#clock @@ fun () ->
+  Lwt_eio.Promise.await_lwt x
+
+let run t = eio_run (Lwt.catch (fun () -> t) print_exc)
 let mk (fn : 'a) : 'a Term.t = Term.(const (fun () -> fn) $ setup_log)
 
 (* INIT *)

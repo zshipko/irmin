@@ -30,6 +30,7 @@
   lwt
   lwt.unix
   uri
+  eio_main
   yaml)
  (preprocess
   (pps ppx_irmin.internal))
