@@ -32,9 +32,13 @@ module Make (I : Cstubs_inverted.INTERNAL) = struct
     Lwt.wakeup_paused ();
     match Lwt.poll x with
     | Some x -> x
-    | None ->
-        let () = Lwt_engine.iter true in
-        run x
+    | None -> (
+        match Lwt.state x with
+        | Return x -> x
+        | Fail e -> raise e
+        | Sleep ->
+            let () = Lwt_engine.iter true in
+            run x)
 
   module Root = struct
     let to_voidp t x = Ctypes.coerce t (ptr void) x
