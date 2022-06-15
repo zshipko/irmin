@@ -1,0 +1,7 @@
+(library
+ (name graphql)
+ (public_name graphql)
+ (wrapped false)
+ (libraries graphql_parser yojson rresult seq)
+ (flags
+  (:standard -w -30)))
