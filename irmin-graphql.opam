@@ -34,10 +34,10 @@ depends: [
 
 # Remove when upgrading to a new graphql release
 pin-depends: [
-  [ "graphql.dev" "git+https://github.com/andreas/ocaml-graphql-server#520ccd4013943ee0b2557aa66367b83aaa67084c" ]
-  [ "graphql-lwt.dev" "git+https://github.com/andreas/ocaml-graphql-server#520ccd4013943ee0b2557aa66367b83aaa67084c" ]
-  [ "graphql-cohttp.dev" "git+https://github.com/andreas/ocaml-graphql-server#520ccd4013943ee0b2557aa66367b83aaa67084c" ]
-  [ "graphql_parser.dev" "git+https://github.com/andreas/ocaml-graphql-server#520ccd4013943ee0b2557aa66367b83aaa67084c" ]
+  [ "graphql.dev" "git+https://github.com/zshipko/ocaml-graphql-server#b2be4daeca46005ddbe79f6e8a38a9c272af0fb5" ]
+  [ "graphql-lwt.dev" "git+https://github.com/zshipko/ocaml-graphql-server#b2be4daeca46005ddbe79f6e8a38a9c272af0fb5" ]
+  [ "graphql-cohttp.dev" "git+https://github.com/zshipko/ocaml-graphql-server#b2be4daeca46005ddbe79f6e8a38a9c272af0fb5" ]
+  [ "graphql_parser.dev" "git+https://github.com/zshipko/ocaml-graphql-server#b2be4daeca46005ddbe79f6e8a38a9c272af0fb5" ]
 ]
 
 
