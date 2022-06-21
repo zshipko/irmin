@@ -1,12 +1,11 @@
 let yojson =
   (module struct
-    type t = Yojson.Basic.json
+    type t = Yojson.Basic.t
 
     let pp = Yojson.Basic.pretty_print ?std:None
     let equal = ( = )
   end : Alcotest.TESTABLE
-    with type t = Yojson.Basic.json)
-  [@@warning "-3"]
+    with type t = Yojson.Basic.t)
 
 let list_of_seq seq =
   let rec loop seq =
