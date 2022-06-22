@@ -540,8 +540,7 @@ let run_command (type a b c)
     let x =
       match v with `Updated _ -> "*" | `Added _ -> "+" | `Removed _ -> "-"
     in
-    print "%s %a" x (Irmin.Type.pp S.Path.t) k;
-    Lwt.return_unit
+    print "%s %a" x (Irmin.Type.pp S.Path.t) k
   in
   (* Check if there was a command passed, if not print a simple message to stdout, if there is
      a command pass the whole diff *)
@@ -551,7 +550,7 @@ let run_command (type a b c)
       let s = Fmt.str "%a" (Irmin.Type.pp_json ty) diff in
       let make_proc () =
         (* Start new process *)
-        let p = Lwt_process.open_process_out (h, Array.of_list (h :: t)) in
+        let p = Unix.open_process_args_out h (Array.of_list (h :: t)) in
         proc := Some p;
         p
       in
@@ -563,21 +562,24 @@ let run_command (type a b c)
             (* Determine if the subprocess completed succesfully or exited with an error,
                if it was successful then we can restart it, otherwise report the exit code
                the user *)
-            let status = p#state in
-            match status with
-            | Lwt_process.Running -> p
-            | Exited (Unix.WEXITED 0) -> make_proc ()
-            | Exited (Unix.WEXITED code) ->
-                Printf.printf "Subprocess exited with code %d\n" code;
-                exit code
-            | Exited (Unix.WSIGNALED code) | Exited (Unix.WSTOPPED code) ->
-                Printf.printf "Subprocess stopped with code %d\n" code;
-                exit code)
+            let pid, status =
+              Unix.(waitpid [ WNOHANG; WUNTRACED ] (process_out_pid p))
+            in
+            if pid = 0 then p
+            else
+              match status with
+              | Unix.WEXITED 0 -> make_proc ()
+              | Unix.WEXITED code ->
+                  Printf.printf "Subprocess exited with code %d\n" code;
+                  exit code
+              | Unix.WSIGNALED code | Unix.WSTOPPED code ->
+                  Printf.printf "Subprocess stopped with code %d\n" code;
+                  exit code)
       in
       (* Write the diff to the subprocess *)
-      let* () = Lwt_io.write_line proc#stdin s in
-      Lwt_io.flush proc#stdin
-  | [] -> Lwt_list.iter_s simple_output diff
+      output_string proc s;
+      flush proc
+  | [] -> List.iter simple_output diff
 
 let handle_diff (type a b)
     (module S : Irmin.Generic_key.S
@@ -600,7 +602,7 @@ let handle_diff (type a b)
         let+ x = view x in
         (x, S.Tree.empty ())
   in
-  let* (diff : (S.path * (S.contents * S.metadata) Irmin.Diff.t) list) =
+  let+ (diff : (S.path * (S.contents * S.metadata) Irmin.Diff.t) list) =
     S.Tree.diff x y
   in
   run_command
@@ -622,7 +624,9 @@ let watch =
          let proc = ref None in
          let () =
            at_exit (fun () ->
-               match !proc with None -> () | Some p -> p#terminate)
+               match !proc with
+               | None -> ()
+               | Some p -> Unix.kill (Unix.process_out_pid p) Sys.sigkill)
          in
          run
            (let* t = store in
