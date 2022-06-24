@@ -1785,6 +1785,18 @@ module Make (P : Backend.S) = struct
     | None -> Lwt.return Seq.empty
     | Some n -> Node.seq ?offset ?length ~cache n >|= get_ok "seq"
 
+  let rec seq_all t ?offset ?length ~cache path : (Path.t * _) Lwt_seq.t Lwt.t =
+    let+ s = seq t ?offset ?length ~cache path in
+    let s = Lwt_seq.of_seq s in
+    Lwt_seq.map_s
+      (fun (step, t) ->
+        let path = Path.rcons path step in
+        match t with
+        | `Contents _ -> Lwt.return @@ Lwt_seq.return (path, t)
+        | `Node _ -> seq_all t ?offset ?length ~cache path)
+      s
+    |> Lwt_seq.flat_map Fun.id
+
   let list t ?offset ?length ?(cache = true) path =
     seq t ?offset ?length ~cache path >|= List.of_seq
 
