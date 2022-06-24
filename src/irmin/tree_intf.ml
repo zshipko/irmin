@@ -190,6 +190,14 @@ module type S = sig
     (step * t) Seq.t Lwt.t
   (** [seq t key] follows the same behavior as {!list} but returns a sequence. *)
 
+  val recursive_seq :
+    t ->
+    ?offset:int ->
+    ?length:int ->
+    cache:bool ->
+    path ->
+    (path * t) Lwt_seq.t Lwt.t
+
   val get : t -> path -> contents Lwt.t
   (** Same as {!get_all} but ignore the metadata. *)
 
