@@ -127,7 +127,7 @@ module Default_types (S : Irmin.Generic_key.S) = struct
     include S.Contents
 
     let name = "Value"
-    let doc = "Values stored in irmin"
+    let doc = "Contents stored in irmin"
   end)
 
   module Hash = Default_type (struct
@@ -149,7 +149,7 @@ module Default_types (S : Irmin.Generic_key.S) = struct
 
     let t = S.commit_key_t
     let name = "CommitKey"
-    let doc = "CommitKey"
+    let doc = "CommitKey is used to refer to a specific commit"
   end)
 
   module Node_key = Default_type (struct
@@ -157,7 +157,7 @@ module Default_types (S : Irmin.Generic_key.S) = struct
 
     let t = S.node_key_t
     let name = "NodeKey"
-    let doc = "NodeKey"
+    let doc = "NodeKey is used to refer to a specific node"
   end)
 
   module Contents_key = Default_type (struct
@@ -165,7 +165,7 @@ module Default_types (S : Irmin.Generic_key.S) = struct
 
     let t = S.contents_key_t
     let name = "ContentsKey"
-    let doc = "ContentsKey"
+    let doc = "ContentsKey is used to refer to a specific value"
   end)
 end
 
@@ -341,7 +341,7 @@ struct
                 ~args:
                   Arg.
                     [
-                      arg ~doc:"Path to contents to retreive" "path"
+                      arg ~doc:"Path of contents to retreive" "path"
                         ~typ:(non_null Input.path);
                     ]
                 ~typ:Types.Contents.schema_typ
@@ -352,7 +352,7 @@ struct
                 ~args:
                   Arg.
                     [
-                      arg ~doc:"Path to contents to retreive" "path"
+                      arg ~doc:"Path of contents to retreive" "path"
                         ~typ:(non_null Input.path);
                     ]
                 ~typ:Lazy.(force contents)
@@ -397,10 +397,10 @@ struct
                         >|= List.rev
                   in
                   tree_list tree path >>= Lwt.return_ok);
-              field "hash" ~doc:"Get hash of tree"
+              field "hash" ~doc:"Get hash of a tree"
                 ~typ:(non_null Types.Hash.schema_typ) ~args:[]
                 ~resolve:(fun _ (tree, _) -> Store.Tree.hash tree);
-              field "key" ~doc:"Get the key for a tree" ~typ:kinded_key ~args:[]
+              field "key" ~doc:"Get the key of a tree" ~typ:kinded_key ~args:[]
                 ~resolve:(fun _ (tree, _) ->
                   match Store.Tree.key tree with
                   | Some (`Contents (k, m)) ->
