@@ -67,5 +67,9 @@ module type Sigs = sig
 
   module Timestamp (T : sig
     val now : unit -> float
-  end) : S with type step = string and type t = string list * float
+  end) : sig
+    include S with type step = string and type t = string list * float
+
+    val make : timestamp:float -> step list -> t
+  end
 end

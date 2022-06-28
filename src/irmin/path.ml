@@ -67,6 +67,7 @@ struct
 
   let map (l, fl) f = String_list.map (l @ [ string_of_float fl ]) f
   let v l = (l, T.now ())
+  let make ~timestamp l = (l, timestamp)
 
   let pp ppf (l, f) =
     String_list.pp ppf l;
