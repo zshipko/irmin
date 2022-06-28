@@ -46,3 +46,38 @@ module String_list = struct
   let of_string s = Ok (List.filter (( <> ) "") (String.cuts s ~sep:"/"))
   let t = Type.like ~pp ~of_string Type.(list step_t)
 end
+
+module Timestamp (T : sig
+  val now : unit -> float
+end) =
+struct
+  type step = String_list.step [@@deriving irmin]
+  type t = String_list.t * float
+
+  let empty = (String_list.empty, 0.)
+  let is_empty (l, fl) = String_list.is_empty l && Float.equal 0. fl
+  let cons s (l, fl) = (String_list.cons s l, fl)
+  let rcons (l, fl) s = (String_list.rcons l s, fl)
+
+  let decons (l, fl) =
+    String_list.decons l |> Option.map (fun (h, t) -> (h, (t, fl)))
+
+  let rdecons (l, fl) =
+    String_list.rdecons l |> Option.map (fun (t, h) -> ((t, fl), h))
+
+  let map (l, fl) f = String_list.map (l @ [ string_of_float fl ]) f
+  let v l = (l, T.now ())
+
+  let pp ppf (l, f) =
+    String_list.pp ppf l;
+    Fmt.char ppf '/';
+    Fmt.float ppf f
+
+  let of_string s =
+    match String_list.of_string s |> Result.map List.rev with
+    | Ok (f :: tl) -> Ok (List.rev tl, float_of_string f)
+    | Ok [] -> Ok ([], 0.)
+    | Error e -> Error e
+
+  let t = Type.like ~pp ~of_string Type.(pair (list step_t) float)
+end

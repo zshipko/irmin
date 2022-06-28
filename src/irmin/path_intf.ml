@@ -64,4 +64,8 @@ module type Sigs = sig
 
   (** An implementation of paths as string lists. *)
   module String_list : S with type step = string and type t = string list
+
+  module Timestamp (T : sig
+    val now : unit -> float
+  end) : S with type step = string and type t = string list * float
 end
