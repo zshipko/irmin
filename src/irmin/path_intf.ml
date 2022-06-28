@@ -70,6 +70,8 @@ module type Sigs = sig
   end) : sig
     include S with type step = string and type t = string list * float
 
+    val timestamp : t -> float
     val make : timestamp:float -> step list -> t
+    val with_timestamp : timestamp:float -> t -> t
   end
 end

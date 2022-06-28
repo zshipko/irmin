@@ -68,15 +68,17 @@ struct
   let map (l, fl) f = String_list.map (l @ [ string_of_float fl ]) f
   let v l = (l, T.now ())
   let make ~timestamp l = (l, timestamp)
+  let with_timestamp ~timestamp (l, _) = (l, timestamp)
+  let timestamp (_, fl) = fl
 
   let pp ppf (l, f) =
     String_list.pp ppf l;
     Fmt.char ppf '/';
-    Fmt.float ppf f
+    Fmt.int64 ppf (Int64.bits_of_float f)
 
   let of_string s =
     match String_list.of_string s |> Result.map List.rev with
-    | Ok (f :: tl) -> Ok (List.rev tl, float_of_string f)
+    | Ok (f :: tl) -> Ok (List.rev tl, Int64.of_string f |> Int64.float_of_bits)
     | Ok [] -> Ok ([], 0.)
     | Error e -> Error e
 
