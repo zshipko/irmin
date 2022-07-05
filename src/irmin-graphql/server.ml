@@ -110,7 +110,7 @@ module Default_types (S : Irmin.Generic_key.S) = struct
     include S.Path
 
     let name = "Path"
-    let doc = "The Path type is used to locate data in a store"
+    let doc = "The Path type is used to identify data in a tree or store"
   end)
 
   module Metadata = Default_type (struct
@@ -134,7 +134,7 @@ module Default_types (S : Irmin.Generic_key.S) = struct
     include S.Hash
 
     let name = "Hash"
-    let doc = "Hash"
+    let doc = "The Hash type is used to uniquely indentify contents and trees"
   end)
 
   module Branch = Default_type (struct
@@ -149,7 +149,7 @@ module Default_types (S : Irmin.Generic_key.S) = struct
 
     let t = S.commit_key_t
     let name = "CommitKey"
-    let doc = "CommitKey is used to refer to a specific commit"
+    let doc = "CommitKey is used to refer to a specific commit stored in irmin"
   end)
 
   module Node_key = Default_type (struct
@@ -157,7 +157,7 @@ module Default_types (S : Irmin.Generic_key.S) = struct
 
     let t = S.node_key_t
     let name = "NodeKey"
-    let doc = "NodeKey is used to refer to a specific node"
+    let doc = "NodeKey is used to refer to a specific node stored in irmin"
   end)
 
   module Contents_key = Default_type (struct
@@ -165,7 +165,7 @@ module Default_types (S : Irmin.Generic_key.S) = struct
 
     let t = S.contents_key_t
     let name = "ContentsKey"
-    let doc = "ContentsKey is used to refer to a specific value"
+    let doc = "ContentsKey is used to refer to a specific value stored in irmin"
   end)
 end
 
