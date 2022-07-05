@@ -57,6 +57,13 @@
 - **irmin-graphql**
   - Updated to `graphql.0.14.0` (#1843, @patricoferris, @zshipko)
 
+### Removed
+
+- **irmin-http*
+  - Removed `irmin-http` since it is not compatible with generic keys. 
+    `irmin-grapqhl` or `irmin-server` should be used instead. 
+    (#1902, @zshipko)
+
 ### Fixed
 
 - **irmin**
