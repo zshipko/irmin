@@ -43,6 +43,13 @@
   - Add a consistency check for the files on disk when opening store (#2004,
   @icristescu)
 
+- **irmin-server**
+  - Added `irmin-server` package (#2031, @zshipko)
+
+- **irmin-client**
+  - Added `irmin-client` package to connect to `irmin-server` instances
+    (#2031, @zshipko)
+
 ### Changed
 
 - **irmin**
@@ -60,8 +67,8 @@
 ### Removed
 
 - **irmin-http*
-  - Removed `irmin-http` since it is not compatible with generic keys. 
-    `irmin-grapqhl` or `irmin-server` should be used instead. 
+  - Removed `irmin-http` since it is not compatible with generic keys.
+    `irmin-grapqhl` or `irmin-server` should be used instead.
     (#1902, @zshipko)
 
 ### Fixed
