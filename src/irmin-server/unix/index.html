@@ -59,8 +59,18 @@
         padding: 5px;
         margin: 5px;
       }
+      
+      #up, #home { 
+        display: inline-block; 
+        width: 25px; 
+        height: 25px; 
+        padding: 5px; 
+        color: black; 
+        vertical-align: middle;
+        text-align: center; 
+      }
 
-      #up:hover {
+      #up:hover, #home:hover {
         cursor: pointer;
         color: white;
         background: black;
@@ -91,7 +101,13 @@
   </head>
   <body class="no-select">
     <h1 class="no-select">Irmin Explorer</h1>
-    <h2 class="no-select">Path: <input id="path" value="%s"/><span class="no-select" id="up">&uarr;</span></h2>
+    <h2 class="no-select">
+      Path: <input id="path" value="%s"/>
+      <span class="no-select" id="up">&uarr;</span>
+      <a href="/">
+        <svg id="home" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-house-door-fill" viewBox="0 0 16 16"> <path d="M6.5 14.5v-3.505c0-.245.25-.495.5-.495h2c.25 0 .5.25.5.5v3.5a.5.5 0 0 0 .5.5h4a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.146-.354L13 5.793V2.5a.5.5 0 0 0-.5-.5h-1a.5.5 0 0 0-.5.5v1.293L8.354 1.146a.5.5 0 0 0-.708 0l-6 6A.5.5 0 0 0 1.5 7.5v7a.5.5 0 0 0 .5.5h4a.5.5 0 0 0 .5-.5z"/> </svg> 
+      </a>
+    </h2>
     <ul id="list" class="text-select"></ul>
     <div id="contents" class="text-select"></div>
     <script>
