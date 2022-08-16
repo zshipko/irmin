@@ -27,6 +27,7 @@ module Make (Codec : Conn.Codec.S) (Store : Irmin.Generic_key.S) = struct
   type t = {
     ctx : Conduit_lwt_unix.ctx;
     uri : Uri.t;
+    http : Conduit_lwt_unix.server option;
     server : Conduit_lwt_unix.server;
     config : Irmin.config;
     repo : Store.Repo.t;
@@ -46,7 +47,7 @@ module Make (Codec : Conn.Codec.S) (Store : Irmin.Generic_key.S) = struct
   let readonly conf =
     Irmin.Backend.Conf.add conf Irmin_pack.Conf.Key.readonly true
 
-  let v ?tls_config ~uri config =
+  let v ?tls_config ?http ~uri config =
     let scheme = Uri.scheme uri |> Option.value ~default:"tcp" in
     let* ctx, server =
       match String.lowercase_ascii scheme with
@@ -80,7 +81,7 @@ module Make (Codec : Conn.Codec.S) (Store : Irmin.Generic_key.S) = struct
     let clients = Hashtbl.create 8 in
     let start_time = Unix.time () in
     let info = Command.Server_info.{ start_time } in
-    { ctx; uri; server; config; repo; clients; info }
+    { ctx; uri; server; http; config; repo; clients; info }
 
   let commands = Hashtbl.create (List.length Command.commands)
   let () = Hashtbl.replace_seq commands (List.to_seq Command.commands)
@@ -254,7 +255,7 @@ module Make (Codec : Conn.Codec.S) (Store : Irmin.Generic_key.S) = struct
 
   let on_exn x = Logs.err (fun l -> l "EXCEPTION: %s" (Printexc.to_string x))
 
-  let dashboard t =
+  let dashboard t mode =
     let list store prefix =
       let* keys = Store.list store prefix in
       let+ keys =
@@ -280,11 +281,21 @@ module Make (Codec : Conn.Codec.S) (Store : Irmin.Generic_key.S) = struct
       if is_contents then
         let* contents = Store.get store prefix in
         let contents' = Irmin.Type.to_json_string Store.contents_t contents in
+        let* last_mod = Store.last_modified store prefix in
+        let last_mod =
+          String.concat ", "
+            (List.map
+               (fun c ->
+                 Store.Commit.hash c |> Irmin.Type.to_json_string Store.hash_t)
+               last_mod)
+        in
         let body =
           Cohttp_lwt.Body.of_string
-            (Printf.sprintf {|{"contents": %s, "hash": %s}|} contents'
+            (Printf.sprintf
+               {|{"contents": %s, "hash": %s, "last_modified": [%s]}|} contents'
                (Irmin.Type.to_json_string Store.hash_t
-                  (Store.Contents.hash contents)))
+                  (Store.Contents.hash contents))
+               last_mod)
         in
         Lwt.return (res, body)
       else
@@ -318,10 +329,14 @@ module Make (Codec : Conn.Codec.S) (Store : Irmin.Generic_key.S) = struct
             @@ Printf.sprintf [%blob "index.html"] path
           in
           Lwt.return (res, body)
-      | _ -> failwith "XXX"
+      | _ ->
+          let status = `Not_found in
+          let res = Cohttp_lwt_unix.Response.make ~status () in
+          let body = Cohttp_lwt.Body.of_string "Not found" in
+          Lwt.return (res, body)
     in
     let server = Cohttp_lwt_unix.Server.make ~callback () in
-    Cohttp_lwt_unix.Server.create ~mode:(`TCP (`Port 9999)) server
+    Cohttp_lwt_unix.Server.create ~mode server
 
   let serve ?stop t =
     let unlink () =
@@ -339,8 +354,12 @@ module Make (Codec : Conn.Codec.S) (Store : Irmin.Generic_key.S) = struct
           unlink ();
           exit 0)
     in
-    let () = Lwt.async (fun () -> dashboard t) in
-    let* () =
+    let http =
+      match t.http with
+      | Some server -> dashboard t server
+      | None -> Lwt.return_unit
+    in
+    let server =
       match Uri.scheme t.uri with
       | Some "ws" | Some "wss" ->
           Websocket_lwt_unix.establish_standard_server ~ctx:t.ctx ~mode:t.server
@@ -351,5 +370,6 @@ module Make (Codec : Conn.Codec.S) (Store : Irmin.Generic_key.S) = struct
           Conduit_lwt_unix.serve ?stop ~ctx:t.ctx ~on_exn ~mode:t.server
             (fun _ ic oc -> callback t ic oc)
     in
+    let* () = Lwt.join [ server; http ] in
     Lwt.wrap (fun () -> unlink ())
 end

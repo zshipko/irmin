@@ -26,6 +26,7 @@ module type S = sig
 
   val v :
     ?tls_config:[ `Cert_file of string ] * [ `Key_file of string ] ->
+    ?http:Conduit_lwt_unix.server ->
     uri:Uri.t ->
     Irmin.config ->
     t Lwt.t
