@@ -27,7 +27,7 @@ module Make (Codec : Conn.Codec.S) (Store : Irmin.Generic_key.S) = struct
   type t = {
     ctx : Conduit_lwt_unix.ctx;
     uri : Uri.t;
-    http : Conduit_lwt_unix.server option;
+    dashboard : Conduit_lwt_unix.server option;
     server : Conduit_lwt_unix.server;
     config : Irmin.config;
     repo : Store.Repo.t;
@@ -47,7 +47,7 @@ module Make (Codec : Conn.Codec.S) (Store : Irmin.Generic_key.S) = struct
   let readonly conf =
     Irmin.Backend.Conf.add conf Irmin_pack.Conf.Key.readonly true
 
-  let v ?tls_config ?http ~uri config =
+  let v ?tls_config ?dashboard ~uri config =
     let scheme = Uri.scheme uri |> Option.value ~default:"tcp" in
     let* ctx, server =
       match String.lowercase_ascii scheme with
@@ -81,7 +81,7 @@ module Make (Codec : Conn.Codec.S) (Store : Irmin.Generic_key.S) = struct
     let clients = Hashtbl.create 8 in
     let start_time = Unix.time () in
     let info = Command.Server_info.{ start_time } in
-    { ctx; uri; server; http; config; repo; clients; info }
+    { ctx; uri; server; dashboard; config; repo; clients; info }
 
   let commands = Hashtbl.create (List.length Command.commands)
   let () = Hashtbl.replace_seq commands (List.to_seq Command.commands)
@@ -354,8 +354,8 @@ module Make (Codec : Conn.Codec.S) (Store : Irmin.Generic_key.S) = struct
           unlink ();
           exit 0)
     in
-    let http =
-      match t.http with
+    let dashboard =
+      match t.dashboard with
       | Some server -> dashboard t server
       | None -> Lwt.return_unit
     in
@@ -370,6 +370,6 @@ module Make (Codec : Conn.Codec.S) (Store : Irmin.Generic_key.S) = struct
           Conduit_lwt_unix.serve ?stop ~ctx:t.ctx ~on_exn ~mode:t.server
             (fun _ ic oc -> callback t ic oc)
     in
-    let* () = Lwt.join [ server; http ] in
+    let* () = Lwt.join [ server; dashboard ] in
     Lwt.wrap (fun () -> unlink ())
 end
