@@ -272,8 +272,16 @@ module Make (Codec : Conn.Codec.S) (Store : Irmin.Generic_key.S) = struct
       in
       List.filter_map Fun.id keys
     in
-    let data_callback prefix =
-      let* store = Store.main t.repo in
+    let data_callback prefix branch =
+      let* store =
+        match branch with
+        | `Hash commit -> (
+            let* commit = Store.Commit.of_hash t.repo commit in
+            match commit with
+            | Some commit -> Store.of_commit commit
+            | None -> failwith "Invalid commit")
+        | `Branch branch -> Store.of_branch t.repo branch
+      in
       let* is_contents =
         Store.kind store prefix >|= fun x -> x = Some `Contents
       in
@@ -318,15 +326,25 @@ module Make (Codec : Conn.Codec.S) (Store : Irmin.Generic_key.S) = struct
       let* () = Cohttp_lwt.Body.drain_body body in
       let uri = Cohttp_lwt_unix.Request.uri req in
       let path = Uri.path uri in
+      let branch_name =
+        Uri.get_query_param uri "branch" |> Option.value ~default:"main"
+      in
+      let branch =
+        match Irmin.Type.of_string Store.hash_t branch_name with
+        | Ok x -> `Hash x
+        | Error _ ->
+            `Branch
+              (Result.get_ok @@ Irmin.Type.of_string Store.branch_t branch_name)
+      in
       let prefix = Irmin.Type.of_string Store.path_t path |> Result.get_ok in
       let meth = Cohttp_lwt_unix.Request.meth req in
       match meth with
-      | `POST -> data_callback prefix
+      | `POST -> data_callback prefix branch
       | `GET ->
           let res = Cohttp_lwt_unix.Response.make () in
           let body =
             Cohttp_lwt.Body.of_string
-            @@ Printf.sprintf [%blob "index.html"] path
+            @@ Printf.sprintf [%blob "index.html"] branch_name path
           in
           Lwt.return (res, body)
       | _ ->
