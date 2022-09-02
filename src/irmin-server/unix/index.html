@@ -1,4 +1,4 @@
-<html>
+<!DOCTYPE html>
   <head>
     <meta charset="utf-8"/>
     <title>Irmin</title>
@@ -215,9 +215,12 @@
       }
 
       function update(path, branch) {
-        pathInput.value = path;
-        branchInput.value = branch;
-        fetch(path + "?branch=" + branchInput.value, {method: 'POST'})
+        let state = history.state || {};
+        if (state.path !== path || state.branch !== branch){
+          history.pushState({path: path, branch: branch}, '');
+        }
+
+        fetch(path + "?branch=" + branch, {method: 'POST'})
         .then(r => r.json())
         .then(data => {
           list.innerHTML = "";
@@ -231,38 +234,34 @@
           for(var i = 0; i < data.length; i++){
             list.appendChild(makeElem(data[i]));
           }
-
-          if (history.state && history.state.path !== pathInput.value && history.state.branch !== branchInput.value){
-            history.pushState({path: pathInput.value, branch: branchInput.value}, '');
-          }
         });
       }
 
-      window.onload = function(){
+      update(pathInput.value, branchInput.value);
+
+      pathInput.onkeydown = function(e){
+        if (e.keyCode == 13){
+          update(e.target.value, branchInput.value);
+        }
+      }
+
+      branchInput.onkeydown = function(e){
+        if (e.keyCode == 13){
+          update(pathInput.value, e.target.value);
+        }
+      }
+
+      document.getElementById("up").onclick = function() {
+        update(pathInput.value.substring(0, pathInput.value.lastIndexOf('/')), branchInput.value);
+      }
+
+      document.getElementById("refresh").onclick = function() {
+        list.innerHTML = "";
         update(pathInput.value, branchInput.value);
+      }
 
-        pathInput.onkeydown = function(e){
-          if (e.keyCode == 13){
-            update(e.target.value, branchInput.value);
-          }
-        }
-
-        branchInput.onkeydown = function(e){
-          if (e.keyCode == 13){
-            update(pathInput.value, e.target.value);
-          }
-        }
-
-        document.getElementById("up").onclick = function() {
-          update(pathInput.value.substring(0, pathInput.value.lastIndexOf('/')), branchInput.value);
-        }
-
-        document.getElementById("refresh").onclick = function() {
-          list.innerHTML = "";
-          update(pathInput.value, branchInput.value);
-        }
-
-        window.onpopstate = function(event){
+      window.onpopstate = function(event){
+        if (event.state !== null){
           update(event.state.path, event.state.branch);
         }
       }
