@@ -19,7 +19,7 @@ TEST test_irmin_value_json(void) {
 
 TEST test_irmin_store(void) {
   // Setup config
-  AUTO IrminConfig *config = irmin_config_git_mem(NULL);
+  AUTO IrminConfig *config = irmin_config_mem(NULL, NULL);
 
   // Initialize repo and store
   AUTO IrminRepo *repo = irmin_repo_new(config);
