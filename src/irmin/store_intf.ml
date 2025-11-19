@@ -1192,10 +1192,15 @@ module type KV =
      and type Schema.Branch.t = string
 
 module type KV_maker_generic_key = sig
-  type endpoint
-  type metadata
-  type hash
+  type endpoint (** The type for remote store endpoints. *)
+
+  type metadata (** The type for metadata to be associated with nodes. *)
+
+  type hash (** The type for hashes. *)
+
   type info
+  (** The type for commit info, representing user-provided information about a
+      commit. *)
 
   include Key.Store_spec.S
 

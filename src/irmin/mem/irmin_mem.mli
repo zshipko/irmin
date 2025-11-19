@@ -36,7 +36,33 @@ module Content_addressable : Irmin.Content_addressable.Maker
 module Atomic_write : Irmin.Atomic_write.Maker
 (** An in-memory store with atomic-write guarantees. *)
 
-(** Constructor for in-memory KV stores. *)
+(** Functor for building in-memory KV stores.
+
+    This functor builds a key-value store that stores its data in memory. It is
+    parameterized by the type of the contents stored in the database. In the
+    example below, we use [Irmin.Contents.String], which means that the values
+    are strings.
+
+    For example, to create a store with string contents:
+{[
+  (* Create a new in-memory store with string contents. [Irmin.Contents.String]
+     is a pre-defined module that uses strings as values. *)
+  module Store = Irmin_mem.KV (Irmin.Contents.String)
+
+  let main =
+    (* Create a new repository. This is a persistent handle to the store. *)
+    let* repo = Store.Repo.v (Irmin_mem.config ()) in
+    (* Get the main branch of the repository. Irmin is git-like, so it has
+       branches. *)
+    let* main = Store.main repo in
+    (* Set a value at path ["a"; "b"] to "c". This creates a new commit. The
+       ~info argument is used to set the commit message. *)
+    let* () = Store.set_exn main ~info:(Irmin.Info.v "commit 1") ["a"; "b"] "c" in
+    (* Get the value at path ["a"; "b"]. *)
+    let* str = Store.get main ["a"; "b"] in
+    print_endline str
+]}
+*)
 module KV :
   Irmin.KV_maker
     with type endpoint = unit
