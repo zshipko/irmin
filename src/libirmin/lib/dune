@@ -13,9 +13,12 @@
  (foreign_stubs
   (language c)
   (names irmin)
-  (flags -Wl,-znow -Wno-unused-variable))
+  (flags -Wno-unused-variable))
  (flags
-  (:standard -w -unused-var-strict))
+  (:standard
+   -w
+   -unused-var-strict
+   (:include link_flags.sexp)))
  (enabled_if
   (<> %{ocaml_version} 5.2.0~alpha1)))
 
@@ -27,3 +30,13 @@
   (libirmin%{ext_dll} as lib/libirm%{ext_dll}))
  (enabled_if
   (<> %{ocaml_version} 5.2.0~alpha1)))
+
+(executable
+ (name discover)
+ (modules discover)
+ (libraries dune-configurator))
+
+(rule
+ (targets link_flags.sexp)
+ (action
+  (run ./discover.exe)))
