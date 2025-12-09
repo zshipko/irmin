@@ -34,7 +34,7 @@
 (executable
  (name discover)
  (modules discover)
- (libraries dune-configurator))
+ (libraries unix))
 
 (rule
  (targets link_flags.sexp)

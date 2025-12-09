@@ -1,54 +1,16 @@
-
- module C = Configurator.V1
-
-module Platform = struct
-  type t = Linux | Macos | Windows
-
-  (* OS detection logic based on Revery's:
-     https://github.com/revery-ui/revery/blob/master/src/Native/config/discover.re *)
-  let detect_header =
-    {|
-#if __APPLE__
-  #define PLATFORM_NAME "mac"
-#elif __linux__
-  #define PLATFORM_NAME "linux"
-#elif WIN32
-  #define PLATFORM_NAME "windows"
-#endif
-|}
-
-  let detect c =
-    let header =
-      let file = Filename.temp_file "discover" "os.h" in
-      let fd = open_out file in
-      output_string fd detect_header;
-      close_out fd;
-      file
-    in
-    let header_basename = Filename.basename header in
-    let header_path = Filename.dirname header in
-    let c_flags = [ "-I"; header_path ] in
-    let includes = [ header_basename ] in
-    let platform =
-      C.C_define.import c ~c_flags ~includes [ ("PLATFORM_NAME", String) ]
-    in
-    match platform with
-    | [ (_, String "linux") ] -> Linux
-    | [ (_, String "mac") ] -> Macos
-    | [ (_, String "windows") ] -> Windows
-    | _ -> failwith "Unsupported platform or operating system"
-end
+let quote s = "\"" ^ s ^ "\""
 
 let () =
-  let flags =
-    [
-    ]
-  in
-  C.main ~name:"libirmin" (fun c ->
-      let platform_flags =
-        match Platform.detect c with
-        | Linux -> ["-ccopt"; "-Wl,-znow"]
-        | Macos -> []
-        | Windows -> []
-      in
-      C.Flags.write_sexp "link_flags.sexp" (flags @ platform_flags))
+    let uname = Unix.open_process_args_in "uname" [| "uname"; "-s" |] in
+    let finally () = In_channel.close uname in
+    let output = Fun.protect ~finally @@ fun () ->
+      In_channel.input_all uname |> String.trim
+    in
+    let flags = match output with
+    | "Linux" -> ["-ccopt"; "-Wl,-znow"]
+    | _ -> [] in
+    let flags = List.map quote flags |> String.concat " " in
+    Out_channel.with_open_text "link_flags.sexp" (fun oc ->
+      Out_channel.output_char oc '(';
+      Out_channel.output_string oc flags;
+      Out_channel.output_char oc ')')
